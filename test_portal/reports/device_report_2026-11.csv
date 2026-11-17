@@ -1,0 +1,4 @@
+device,os,last_seen,disk_free_gb,status
+VM-DEMO-01,Windows 11,2026-11-01,14.2,healthy
+VM-DEMO-02,Windows 11,2026-11-01,3.1,low disk
+VM-DEMO-03,Windows 10,2026-10-30,22.8,healthy

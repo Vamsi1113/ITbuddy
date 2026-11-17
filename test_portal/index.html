@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Test Portal</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; max-width: 640px; margin: 48px auto; color: #1f2937; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; }
+  a.button { background: #2563eb; color: white; padding: 6px 12px; border-radius: 6px; text-decoration: none; }
+</style>
+</head>
+<body>
+  <h1>Test Portal — Reports</h1>
+  <p>Local demo portal for IT Buddy scenario 5.</p>
+  <table>
+    <tr><th>Report</th><th>Date</th><th></th></tr>
+    <tr><td>Monthly device report</td><td>2026-11-01</td>
+        <td><a class="button" id="latest-report" href="reports/device_report_2026-11.csv" download>Download latest report</a></td></tr>
+    <tr><td>Monthly device report</td><td>2026-10-01</td>
+        <td><a href="reports/device_report_2026-10.csv" download>Download</a></td></tr>
+  </table>
+</body>
+</html>
