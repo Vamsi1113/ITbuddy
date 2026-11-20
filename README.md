@@ -233,7 +233,7 @@ bottom-right of the screen, always on top. Click it to open the chat (1/4 of the
 height, rounded corners, just above the avatar); the close button sends the chat back to the avatar, which shows a
 red dot when an answer arrived while the chat was closed. No server needs to be started first.
 Header icons (top left) open the Agents, Connectors and Tools sheets; the arrow tab on the chat's left edge pulls out
-the Live view; the gear holds Autopilot, Live view, Read-only, Open full console (Streamlit, port 8501) and Quit.
+the Live view (the window is always as wide as chat + panel and only the visible part slides, so nothing resizes or shakes); the gear holds Autopilot, Live view, Read-only, Open full console (Streamlit, port 8501) and Quit.
 Only one copy runs: opening Tobi again opens the chat of the running one, replaces a frozen one, and a watchdog
 restarts the app if its window stops answering (for example after the laptop wakes from sleep).
 Dev flags: `--open`, `--demo "text"`, `--probe`, `--shot file.png`, `--wait N`.

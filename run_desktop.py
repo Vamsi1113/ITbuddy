@@ -48,13 +48,21 @@ def work_area() -> tuple[int, int, int, int]:
     return r.left, r.top, r.right, r.bottom
 
 
+def chat_width() -> int:
+    return round(webview.screens[0].width / 4)
+
+
 def geometry() -> tuple[int, int, int, int]:
-    """Chat window (x, y, width, height): 1/4 of the screen width, up to 3/4 of its height, just above the avatar."""
+    """Chat window (x, y, width, height). The visible chat is 1/4 of the screen wide and up to 3/4 tall, just above the
+    avatar. The window itself is wider by the live panel and stays that size: the live view slides out by revealing
+    part of the window, never by resizing it (resizing a web page 60 times a second judders and shakes)."""
     screen = webview.screens[0]
-    _, top, right, bottom = work_area()
-    width = round(screen.width / 4)
+    left, top, right, bottom = work_area()
+    width = chat_width()
     height = min(round(screen.height * 3 / 4), bottom - top - 2 * MARGIN - PET - 8)
-    return right - width - MARGIN, bottom - PET - 8 - MARGIN - height, width, height
+    chat_x = right - width - MARGIN
+    x = chat_x - LIVE_PANEL_WIDTH if chat_x - LIVE_PANEL_WIDTH >= left else chat_x     # the panel opens on the roomy side
+    return x, bottom - PET - 8 - MARGIN - height, width + LIVE_PANEL_WIDTH, height
 
 
 def pet_geometry() -> tuple[int, int, int, int]:
@@ -65,34 +73,6 @@ def pet_geometry() -> tuple[int, int, int, int]:
 # ---------------------------------------------------------------------------------------------- Windows plumbing
 def _hwnd(title: str) -> int:
     return ctypes.windll.user32.FindWindowW(None, title)
-
-
-def round_corners(win, radius: int = 8) -> None:
-    """Round the window corners by clipping the window, and the browser windows inside it, to a rounded rectangle
-    (radius in logical pixels). A frameless WebView2 window has no native rounding."""
-    try:
-        user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
-        top = win.native.Handle.ToInt64()
-        d = round(radius * 2 * user32.GetDpiForWindow(top) / 96)
-
-        def clip(hwnd: int) -> None:
-            r = wt.RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(r))
-            user32.SetWindowRgn(hwnd, gdi32.CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, d, d), True)
-
-        clip(top)
-        enum = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-
-        def child(hwnd, _):
-            r, t = wt.RECT(), wt.RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(r))
-            user32.GetWindowRect(top, ctypes.byref(t))
-            if r.left - t.left <= 2 and r.top - t.top <= 2:           # the browser area that fills the window
-                clip(hwnd)
-            return True
-        user32.EnumChildWindows(top, enum(child), 0)
-    except Exception:
-        pass
 
 
 PID_FILE = ROOT / "data" / f"desktop{_SUFFIX}.pid"
@@ -226,14 +206,14 @@ def main() -> int:
     api = Api()
     window = webview.create_window(
         CHAT_TITLE, url=str(WEB), js_api=api, width=w, height=h, x=x, y=y, frameless=True, easy_drag=False,
-        resizable=True, min_size=(280, 440), background_color="#E8F3EE", text_select=True, shadow=False, hidden=True)
+        resizable=False, background_color="#E8F3EE", text_select=True, shadow=False, hidden=True)
     px, py, pw, ph = pet_geometry()
     pet = webview.create_window(
         PET_TITLE, url=str(PET_WEB), js_api=api, width=pw, height=ph, x=px, y=py, frameless=True, easy_drag=False,
         resizable=False, min_size=(PET, PET), on_top=True, transparent=True, background_color="#000000", shadow=False)
     left, _, _, _ = work_area()
-    api.attach(window, w, fix_east=x - LIVE_PANEL_WIDTH >= left)
-    api.attach_pet(pet, on_shown=lambda: round_corners(window))
+    api.attach(window, w, fix_east=(x + w == work_area()[2] - MARGIN))      # panel on the left: the window's right edge is the chat's
+    api.attach_pet(pet)
     def on_closing():                              # Alt+F4 on the chat sends it back to the avatar; only Quit ends the app
         if api.quitting or testing:
             return True
@@ -250,8 +230,7 @@ def main() -> int:
         window.move(x, y)
         pet.resize(pw, ph)
         pet.move(px, py)
-        round_corners(window, 8)
-        window.events.resized += lambda *_: round_corners(window)
+        api.apply_region()                          # chat only: the live panel part of the window starts cut away
         if not show_now:
             for _ in range(3):                     # the chat must start hidden: only the avatar shows until it is clicked
                 window.hide()

@@ -45,6 +45,8 @@ class Api:
         self._live_open = False
         self._base_width = 0
         self._pet = None
+        self.animating = False              # True while the window slides (the corner clip is then driven by the animation)
+        self._anim_lock = threading.Lock()
         from agent.memory import Conversation
         self._memory = Conversation()          # earlier messages of this chat ("New chat" clears it)
         self.quitting = False               # True once Quit was chosen (the chat may then really close)
@@ -198,21 +200,41 @@ class Api:
     # ------------------------------------------------------------------ window
     def set_live(self, open_: bool) -> dict:
         """Pull the live view out (the window grows sideways) or push it back."""
-        from webview.window import FixPoint
+        from desktop import winanim
+        side = "left" if self._fix_east else "right"
         if self._window is None or bool(open_) == self._live_open:
-            return {"open": self._live_open, "side": "left" if self._fix_east else "right"}
-        start = self._window.width
-        end = max(start + (LIVE_PANEL_WIDTH if open_ else -LIVE_PANEL_WIDTH), 200)
-        fix = FixPoint.EAST if self._fix_east else FixPoint.WEST
-        steps, total = 26, 0.62                         # a slow, eased slide: the window grows/shrinks over ~0.6 s
-        t0 = time.time()
-        for i in range(1, steps + 1):
-            k = i / steps
-            ease = k * k * (3 - 2 * k)                  # smoothstep: gentle start, gentle stop
-            self._window.resize(round(start + (end - start) * ease), self._window.height, fix)
-            time.sleep(max(0.0, t0 + total * k - time.time()))
+            return {"open": self._live_open, "side": side}
+        with self._anim_lock:
+            hwnd = self._window.native.Handle.ToInt64()
+            k = winanim.scale(hwnd)
+            hidden = round(LIVE_PANEL_WIDTH * k)
+            self.animating = True
+            try:
+                # The window is always wide enough for the chat AND the live panel; only the visible band moves.
+                # Nothing is resized, so the page is not laid out again: no juddering and the chat cannot shake.
+                winanim.reveal(hwnd, 0 if not open_ else hidden, hidden if not open_ else 0, self._fix_east,
+                               radius_px=round(8 * k), duration=0.55)
+            finally:
+                self.animating = False
         self._live_open = bool(open_)
         return {"open": self._live_open, "side": "left" if self._fix_east else "right"}
+
+    def apply_region(self) -> None:
+        """Clip the chat window to what should be visible now: the chat, plus the live panel when it is pulled out."""
+        if self._window is None:
+            return
+        from desktop import winanim
+        try:
+            hwnd = self._window.native.Handle.ToInt64()
+            k = winanim.scale(hwnd)
+            hidden = 0 if self._live_open else round(LIVE_PANEL_WIDTH * k)
+            _, _, width, _ = winanim.rect(hwnd)
+            if self._fix_east:
+                winanim.set_visible_band(hwnd, hidden, width, round(8 * k))
+            else:
+                winanim.set_visible_band(hwnd, 0, width - hidden, round(8 * k))
+        except Exception:
+            pass
 
     def _note_unread(self) -> None:
         if not self._visible:
@@ -226,11 +248,7 @@ class Api:
             except Exception:
                 pass
         if self._window is not None:
-            self._window.show()
-            self._window.restore()
-            if self._on_shown:                   # the window may be re-created while it opens: re-apply the corners
-                for delay in (0.15, 0.6):
-                    threading.Timer(delay, self._on_shown).start()
+            self._animate_chat(show=True)
             self._visible, self._unread = True, False
             self._pet_state()
             try:
@@ -239,9 +257,40 @@ class Api:
                 pass
         return True
 
+    def _animate_chat(self, show: bool) -> None:
+        """The chat fades and glides in from the avatar (and back out): hidden -> shown or shown -> hidden."""
+        from desktop import winanim
+        with self._anim_lock:
+            self.animating = True
+            hwnd = self._window.native.Handle.ToInt64()
+            try:
+                k = winanim.scale(hwnd)
+                lift = round(26 * k)                                   # how far it glides
+                radius = round(8 * k)
+                left, top, width, height = winanim.rect(hwnd)
+                self.apply_region()
+                if show:
+                    winanim.set_alpha(hwnd, 0)
+                    winanim.set_rect(hwnd, left, top + lift, width, height)
+                    self._window.show()
+                    self._window.restore()
+                    winanim.animate(hwnd, (left, top, width, height), duration=0.24, ease=winanim.ease_out,
+                                    start=(left, top + lift, width, height), alpha=(0, 255))
+                    winanim.clear_alpha(hwnd)
+                else:
+                    winanim.animate(hwnd, (left, top + lift // 2, width, height), duration=0.16, alpha=(255, 0))
+                    self._window.hide()
+                    winanim.set_rect(hwnd, left, top, width, height)   # back to its place for the next time
+                    winanim.clear_alpha(hwnd)
+            finally:
+                self.animating = False
+
     def hide_chat(self) -> bool:
         if self._window is not None:
-            self._window.hide()
+            if self._visible:
+                self._animate_chat(show=False)
+            else:
+                self._window.hide()
             self._visible = False
             self._pet_state()
         return False

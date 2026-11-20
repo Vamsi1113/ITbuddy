@@ -21,12 +21,10 @@ svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width:
 .app { display: flex; height: 100vh; width: 100vw; position: relative; }
 .app[data-side="right"] { flex-direction: row-reverse; }
 .chat { position: relative; flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.live { display: none; flex: 0 0 var(--live-w); width: var(--live-w); height: 100%; flex-direction: column;
+.live { display: flex; flex: 0 0 var(--live-w); width: var(--live-w); height: 100%; flex-direction: column;
   background: linear-gradient(185deg, var(--sky1), var(--sky2) 55%, #D3EEF0); border-right: 1px solid var(--line); }
 .app[data-side="right"] .live { border-right: 0; border-left: 1px solid var(--line); }
-.app[data-live="open"] .live { display: flex; }
-.app.anim { position: absolute; top: 0; bottom: 0; width: var(--anim-w); }
-.app.anim[data-side="left"] { right: 0; } .app.anim[data-side="right"] { left: 0; }
+/* The window is always as wide as chat + live panel; the native window clips away the panel until it is pulled out. */
 
 /* ------------------------------------------------------------------ header */
 .head { flex: none; height: var(--head-h); position: relative; z-index: 5;
@@ -141,8 +139,8 @@ textarea::placeholder { color: rgba(19, 27, 43, .42); }
 .pull:hover { width: 21px; background: linear-gradient(180deg, var(--navy), var(--slate)); }
 .pull svg { width: 13px; height: 13px; stroke-width: 2.4; transition: transform .25s; }
 .pull.alert::after { content: ""; position: absolute; top: 6px; left: 3px; width: 7px; height: 7px; border-radius: 50%; background: #9AD3F0; animation: ping 1.4s infinite; }
-.app[data-side="left"] .pull { left: 0; } .app[data-side="left"][data-live="open"] .pull { left: var(--live-w); }
-.app[data-side="right"] .pull { right: 0; } .app[data-side="right"][data-live="open"] .pull { right: var(--live-w); }
+.app[data-side="left"] .pull { left: var(--live-w); }
+.app[data-side="right"] .pull { right: var(--live-w); }
 .app[data-side="right"] .pull svg { transform: rotate(180deg); }
 .app[data-live="open"] .pull svg { transform: rotate(180deg); } .app[data-side="right"][data-live="open"] .pull svg { transform: none; }
 

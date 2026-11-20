@@ -180,16 +180,12 @@
     const want = force === undefined ? !state.liveOpen : force;
     if (state.liveBusy || want === state.liveOpen) return;
     state.liveBusy = true;
-    const app = $('#app'), LIVE = 340;
-    // while the window slides, the layout keeps its final width and is pinned to the edge that does not move,
-    // so the panel is revealed (or covered) by the moving window edge instead of squeezing the chat
-    app.style.setProperty('--anim-w', (window.innerWidth + (want ? LIVE : 0)) + 'px');
-    app.dataset.side = state.side; app.classList.add('anim'); app.dataset.live = 'open';
-    $('#pull').classList.remove('alert');
+    const app = $('#app');
+    app.dataset.live = want ? 'open' : 'closed';                 // the arrow turns at once; the native window then
+    $('#pull').classList.remove('alert');                         // slides the panel into view (or away) smoothly
     const r = await call('set_live', want);
     state.liveBusy = false;
-    app.classList.remove('anim');
-    if (r === null) { app.dataset.live = 'closed'; return; }          // no window bridge (browser preview)
+    if (r === null) { app.dataset.live = state.liveOpen ? 'open' : 'closed'; return; }   // no window bridge (browser preview)
     state.liveOpen = r.open; state.side = r.side || state.side;
     app.dataset.live = r.open ? 'open' : 'closed'; app.dataset.side = state.side;
     $('#pull').title = r.open ? 'Hide live view' : 'Show live view';
@@ -315,7 +311,7 @@
     $('#opt-new').onclick = () => { $('#menu').hidden = true; call('new_chat'); stream.innerHTML = ''; state.lastWho = state.lastRow = null; greet(); };
 
     const info = (await call('info')) || { name: 'Tobi', model: '', logo: '' };
-    state.logo = info.logo || ''; if (info.side) state.side = info.side;
+    state.logo = info.logo || ''; if (info.side) { state.side = info.side; $('#app').dataset.side = info.side; }
     if (state.logo) { $('#logo').src = state.logo; }
     $('#opt-autopilot').checked = !!info.autopilot; $('#opt-readonly').checked = !!info.readOnly;
     $('#status').title = info.model || '';
