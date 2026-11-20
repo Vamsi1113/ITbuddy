@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 from appconfig import ROOT, cfg, expand
+from tools.registry import R1, Param, tool
 
 _PORTAL_DIR = ROOT / "test_portal"
 _server_lock = threading.Lock()
@@ -63,6 +64,7 @@ _TASKS = {
 }
 
 
+@tool("computer_use", R1, "Run one predefined Playwright script.", params=(Param("task_id"),))
 def run_browser_task(task_id: str) -> dict:
     if task_id not in _TASKS or task_id not in (cfg("browser", "allowed_tasks", default={}) or {}):
         return {"ok": False, "error": f"Unknown or not allowed browser task '{task_id}'"}

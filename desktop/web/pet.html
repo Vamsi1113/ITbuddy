@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Tobi Pet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #CFEAE0; user-select: none; -webkit-user-select: none; cursor: pointer; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<script src="vendor/three.min.js"></script>
+<script>
+/* Tobi as a 3D character built from the logo: blue rounded head, orange hat, big eyes, shades and a wide grin.
+   It idles (bobs, blinks, looks at the mouse), talks while the agent is working, and shows a red bulb when an
+   answer is waiting. The window is clipped to the character's silhouette (see sendShape), so there is no frame. */
+(() => {
+  const canvas = document.getElementById('c');
+  const SIZE = canvas.clientWidth || 110;
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(SIZE, SIZE, false);
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+  camera.position.set(0, 0.05, 5.9);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9); sun.position.set(-2, 3, 4); scene.add(sun);
+
+  const BLACK = new THREE.MeshBasicMaterial({ color: 0x0b0e1a });
+  const OUT = new THREE.MeshBasicMaterial({ color: 0x0b0e1a, side: THREE.BackSide });
+  const std = (color, extra = {}) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.45, metalness: 0.05 }, extra));
+  const outlined = (geo, mat, grow = 1.08) => {                  // a mesh with a black inverted-hull outline
+    const g = new THREE.Group(); g.add(new THREE.Mesh(geo, mat));
+    const o = new THREE.Mesh(geo, OUT); o.scale.setScalar(grow); g.add(o); return g;
+  };
+
+  const rig = new THREE.Group(); scene.add(rig);                   // everything that moves with the character
+  const head = new THREE.Group(); rig.add(head);
+
+  // head: rounded square, slightly puffy
+  const shape = new THREE.Shape(); const W = 1.5, H = 1.45, R = 0.3, x0 = -W / 2, y0 = -H / 2;
+  shape.moveTo(x0 + R, y0); shape.lineTo(x0 + W - R, y0); shape.quadraticCurveTo(x0 + W, y0, x0 + W, y0 + R);
+  shape.lineTo(x0 + W, y0 + H - R); shape.quadraticCurveTo(x0 + W, y0 + H, x0 + W - R, y0 + H); shape.lineTo(x0 + R, y0 + H);
+  shape.quadraticCurveTo(x0, y0 + H, x0, y0 + H - R); shape.lineTo(x0, y0 + R); shape.quadraticCurveTo(x0, y0, x0 + R, y0);
+  const headGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.1, bevelSegments: 5, curveSegments: 14 });
+  headGeo.translate(0, 0, -0.25);
+  const skin = outlined(headGeo, std(0x5e9eff, { roughness: 0.4 }), 1.045); head.add(skin);
+  const FRONT = 0.42;                                              // z of the face surface
+
+  // hat: orange brim + crown, perched on the top-left
+  const hat = new THREE.Group(); hat.position.set(-0.52, 0.86, 0.05); hat.rotation.z = 0.42; head.add(hat);
+  const orange = std(0xff9d1a, { roughness: 0.3 });
+  const brim = outlined(new THREE.CylinderGeometry(0.46, 0.46, 0.09, 32), orange, 1.1); hat.add(brim);
+  const crown = outlined(new THREE.CylinderGeometry(0.27, 0.3, 0.2, 28), orange, 1.12); crown.position.y = 0.13; hat.add(crown);
+
+  // eyes: big white ovals with pupils, peeking above the shades
+  const eyes = [];
+  [[-0.3, 0.3, 0.16], [0.3, 0.4, -0.12]].forEach(([x, y, tilt]) => {
+    const g = new THREE.Group(); g.position.set(x, y, FRONT + 0.03); g.rotation.z = tilt;
+    const ball = outlined(new THREE.SphereGeometry(1, 24, 18), std(0xffffff, { roughness: 0.2 }), 1.16); ball.scale.set(0.15, 0.24, 0.06); g.add(ball);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), BLACK); pupil.scale.set(0.075, 0.115, 0.04); pupil.position.set(0.025, -0.07, 0.05); g.add(pupil);
+    g.userData = { ball, pupil }; head.add(g); eyes.push(g);
+  });
+
+  // shades: two blue lenses, a bridge and one arm
+  const lensMat = std(0x1f2f9e, { roughness: 0.12, metalness: 0.6 });
+  [[-0.36, -0.1, 0.14], [0.37, 0.0, 0.14]].forEach(([x, y, tilt]) => {
+    const lens = outlined(new THREE.SphereGeometry(1, 28, 20), lensMat, 1.12); lens.scale.set(0.38, 0.3, 0.07);
+    lens.position.set(x, y, FRONT + 0.06); lens.rotation.z = tilt; head.add(lens);
+    const glint = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.4), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 }));
+    glint.position.set(x + 0.08, y + 0.02, FRONT + 0.14); glint.rotation.z = -0.5; head.add(glint);
+  });
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.07, 0.05), BLACK); bridge.position.set(0, -0.04, FRONT + 0.08); bridge.rotation.z = 0.12; head.add(bridge);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.07, 0.06), BLACK); arm.position.set(-0.86, -0.19, FRONT - 0.04); arm.rotation.z = -0.16; head.add(arm);
+
+  // mouth: a black half-disc (the jaw drops when it talks) with a white row of teeth along the top
+  const mouth = new THREE.Group(); mouth.position.set(0.04, -0.44, FRONT + 0.04); head.add(mouth);
+  const jaw = new THREE.Mesh(new THREE.CircleGeometry(1, 40, Math.PI, Math.PI), BLACK); mouth.add(jaw);
+  const teeth = new THREE.Mesh(new THREE.PlaneGeometry(0.84, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff })); teeth.position.set(0, -0.08, 0.01); mouth.add(teeth);
+  const smileTop = new THREE.Mesh(new THREE.PlaneGeometry(1.02, 0.1), BLACK); smileTop.position.set(0, 0.02, 0.005); mouth.add(smileTop);
+
+  // notification bulb
+  const bulb = outlined(new THREE.SphereGeometry(0.2, 20, 16), new THREE.MeshBasicMaterial({ color: 0xff3b47 }), 1.25);
+  bulb.position.set(0.78, 0.82, 0.55); bulb.visible = false; rig.add(bulb);
+
+  // ---------------------------------------------------------------- behaviour
+  const S = { open: false, unread: false, talking: false, look: [0, 0], hop: 0, nextBlink: 2, blink: 0 };
+  window.setPet = (open, unread, talking) => { S.open = !!open; S.unread = !!unread; S.talking = !!talking; bulb.visible = S.unread; };
+  document.addEventListener('mousemove', (e) => { S.look = [(e.clientX / innerWidth - 0.5) * 2, (e.clientY / innerHeight - 0.5) * 2]; });
+  document.addEventListener('mouseleave', () => { S.look = [0, 0]; });
+  document.addEventListener('click', () => { S.hop = 1; const api = window.pywebview && window.pywebview.api; api && api.toggle_chat(); });
+
+  const clock = new THREE.Clock(); let frame = 0, lastKey = '';
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function tick() {
+    const t = clock.getElapsedTime(); frame++;
+    const talk = S.talking ? 1 : 0;
+    rig.position.y = Math.sin(t * 2) * 0.045 + (S.hop > 0 ? Math.sin(S.hop * Math.PI) * 0.18 : 0);
+    S.hop = Math.max(0, S.hop - 0.05);
+    const ty = S.look[0] * 0.55 + Math.sin(t * 0.9) * 0.12, tx = S.look[1] * 0.3 + (talk ? Math.sin(t * 6) * 0.06 : 0);
+    head.rotation.y = lerp(head.rotation.y, ty, 0.12); head.rotation.x = lerp(head.rotation.x, tx, 0.12);
+    head.rotation.z = lerp(head.rotation.z, Math.sin(t * 1.3) * 0.04 + (talk ? Math.sin(t * 4.5) * 0.05 : 0), 0.1);
+    hat.rotation.z = 0.42 + Math.sin(t * 2.2) * 0.03;
+    // mouth: wide grin at rest, jaw flaps while talking
+    const open = talk ? 0.2 + 0.55 * Math.abs(Math.sin(t * 13) * (0.6 + 0.4 * Math.sin(t * 4.7))) : 0.2 + 0.03 * Math.sin(t * 2);
+    jaw.scale.set(0.51, 0.2 + 0.5 * open, 1);
+    teeth.visible = open < 0.6;
+    // blink
+    S.nextBlink -= 1 / 60; if (S.nextBlink < 0) { S.blink = 1; S.nextBlink = 2.5 + Math.random() * 3; }
+    S.blink = Math.max(0, S.blink - 0.12);
+    const lid = 1 - Math.sin(S.blink * Math.PI) * 0.9;
+    eyes.forEach((e) => { e.userData.ball.scale.y = 0.24 * lid; e.userData.pupil.scale.y = 0.115 * lid; });
+    if (bulb.visible) bulb.scale.setScalar(1 + Math.sin(t * 7) * 0.12);
+    renderer.render(scene, camera);
+    if (frame % 4 === 0) sendShape();
+    requestAnimationFrame(tick);
+  }
+
+  // The window is clipped to what the character covers: read the picture's alpha on a coarse grid and send the covered
+  // runs to Python, which turns them into the window region. This is what removes the frame/background.
+  const G = 56, grid = document.createElement('canvas'); grid.width = grid.height = G;
+  const gctx = grid.getContext('2d', { willReadFrequently: true });
+  function sendShape() {
+    const api = window.pywebview && window.pywebview.api; if (!api || !api.set_shape) return;
+    gctx.clearRect(0, 0, G, G); gctx.drawImage(canvas, 0, 0, G, G);
+    const px = gctx.getImageData(0, 0, G, G).data, runs = [];
+    for (let y = 0; y < G; y++) {
+      let x = 0;
+      while (x < G) {
+        while (x < G && px[(y * G + x) * 4 + 3] < 40) x++;
+        const s = x; while (x < G && px[(y * G + x) * 4 + 3] >= 40) x++;
+        if (x > s) runs.push(y, s, x);
+      }
+    }
+    const key = runs.join(','); if (key === lastKey) return; lastKey = key;
+    api.set_shape(runs, G);
+  }
+  window.addEventListener('pywebviewready', () => { lastKey = ''; });
+  tick();
+})();
+</script></body></html>

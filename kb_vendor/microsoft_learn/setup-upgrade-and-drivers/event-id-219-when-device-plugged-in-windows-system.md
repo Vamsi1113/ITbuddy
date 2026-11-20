@@ -1,0 +1,42 @@
+<!-- source: https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/event-id-219-when-device-plugged-in-windows-system -->
+# Kernel-PnP Event ID 219 is logged together with UMDF Event ID 10118 during Windows startup
+
+Describes why Kernel-PnP event ID 219 might be logged with UMDF event ID 10118 during Windows startup and when no action is required.
+
+This article explains why Kernel-PnP event ID 219 might be logged together with User-Mode Driver Framework (UMDF) event ID 10118 during Windows startup and when these events can be safely ignored.
+
+_Original KB number:_   974720
+
+## Symptoms
+
+During Windows startup, when Windows tries to start a device that uses a UMDF driver, the following Kernel-PnP warning event might be logged in the System log:
+
+> Warning xxxx/xx/xx xx:xx:xx Kernel-PnP 219 (212)
+> The driver \\Driver\\WudfRd failed to load for the device xxxx.
+
+This warning might be accompanied by the following DriverFrameworks-UserMode informational event:
+
+> Information xxxx/xx/xx xx:xx:xx DriverFrameworks-UserMode 10118 Startup of the UMDF reflector
+> UMDF reflector is unable to connect to service control manager (SCM). This is expected during boot, when SCM has not started yet. Will retry when it starts.
+
+## Cause
+
+The UMDF reflector is the kernel-mode component that enables a device to use a UMDF driver. During Windows startup, the reflector might try to connect to the Service Control Manager (SCM) before SCM has started.
+
+In this situation, the reflector logs informational event ID 10118 to indicate that the connection isn't yet available and will be retried when SCM starts. Kernel-PnP event ID 219 might also be logged because the device couldn't be started at that time.
+
+## Resolution
+
+For this startup timing condition, no action is required. The UMDF reflector retries the connection when SCM starts, allowing Windows to retry starting the device.
+
+If the events occur only during startup and the device subsequently starts and works correctly, you can safely ignore them.
+
+You can confirm the driver is loaded successfully in the **System Information**, and you can confirm the devices are running correctly in the **Device Manager**.
+
+If the events continue after startup or the device doesn't work correctly, investigate the device or driver issue. Don't assume that every Kernel-PnP event ID 219 is caused by this startup timing condition.
+
+## Data collection
+
+If you need assistance from Microsoft support, we recommend you collect the information by following the steps mentioned in Gather information by using TSS for deployment-related issues.
+
+_Source: Microsoft Learn, licensed CC BY 4.0._

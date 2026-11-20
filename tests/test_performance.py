@@ -29,7 +29,7 @@ def test_running_processes_top_five():
 
 def test_protected_and_own_processes_are_refused():
     assert performance.protection_reason(4) is not None            # System
-    assert performance.protection_reason(os.getpid()) is not None  # IT Buddy itself
+    assert performance.protection_reason(os.getpid()) is not None  # Tobi itself
     assert performance.protection_reason(os.getppid()) is not None
     assert performance.protection_reason(999_999_999) is not None  # does not exist
     for p in psutil.process_iter(["name"]):

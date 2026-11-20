@@ -4,6 +4,7 @@ The approval node only calls interrupt(), so nothing is re-run when the graph re
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import TypedDict
 
@@ -12,36 +13,50 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from agent import router
+from agent import autopilot, live, memory, router, specialists
 from agent.llm import ModelError
-from agent.specialists import LABELS, SPECIALISTS
+from agent.specialists import COMPUTER_USE, DOMAINS, LABELS
 from appconfig import cfg, data_path
 from safety import audit, policy
 from safety.policy import PolicyError, ToolRunner
-from tools.registry import TOOLS
+from safety.redact import redact
+from tools import printing, tickets
 
 
 class State(TypedDict, total=False):
     task_id: str
     request: str
-    agent: str             # performance | storage | network | computer_use | none | refused
+    agent: str             # a domain name, or "none"
     question: str
+    plan: list             # [{"tool", "args"}] read-only checks chosen for this request
     diagnostics: dict      # tool name -> tool output (the "before" measurements)
     proposal: dict         # diagnosis, fix, summary, what_changes, steps
     decision: str          # approved | rejected
     fix_results: list
     comparison: list       # [{"metric", "before", "after"}]
     verify_note: str
-    outcome: str           # fixed | not_fixed | rejected | refused | no_action | unsupported | error
+    ticket: dict           # {"ref", "priority", "category"} when a ticket was opened
+    secret_found: bool
+    outcome: str           # fixed | not_fixed | rejected | refused | no_action | escalated | unsupported | chat | error
+    cu_choice: dict        # Computer Use: the task already picked while routing
+    history: list          # earlier turns of this chat [{"role": "user"|"assistant", "text"}]
+    original_request: str  # what the user typed, before a follow-up was made standalone
     report: str
     error: str
     tool_calls: int
+    mode: str              # "autopilot" forces the general agent
+    auto_history: list     # Autopilot: what it did and saw so far
+    auto_pending: dict     # Autopilot: the step waiting to run or to be approved
+    auto_next: str         # run | approve | final
+    auto_approved: bool
+    auto_steps: int
+    auto_actions: list     # changes Autopilot made, for the report
 
 
-def _emit(agent: str | None, text: str, tool: str | None = None) -> None:
-    """Live status line for the interface (FR-2)."""
+def _emit(agent: str | None, text: str, tool: str | None = None, image: str | None = None) -> None:
+    """Live status line for the interface (optionally with a screenshot of what just happened)."""
     try:
-        get_stream_writer()({"agent": LABELS.get(agent or "", "IT Buddy"), "tool": tool, "text": text})
+        get_stream_writer()({"agent": LABELS.get(agent or "", "Tobi"), "tool": tool, "text": text, "image": image})
     except Exception:
         pass  # not running inside a stream
 
@@ -55,64 +70,227 @@ def _run(runner: ToolRunner, tool: str, args: dict | None = None, approved: bool
     result = runner.run(tool, args, approved=approved)
     if result.get("ok") is False:
         _emit(runner.agent, f"{tool} failed: {result.get('error') or result.get('output')}", tool)
+    elif approved:      # a change was made: show what the screen looks like now
+        _emit(runner.agent, f"Done: {label or tool}", tool, image=live.capture(runner.task_id, tool))
     return result
+
+
+def _open_ticket(state: State, title: str, summary: str, category: str = "incident", priority: str = "P3") -> dict:
+    """Open a ticket with the full context package, so the user never has to repeat themselves."""
+    notes = []
+    for key, out in (state.get("diagnostics") or {}).items():
+        notes.append(f"{key}: {json.dumps(out, default=str)[:400]}")
+    proposal = state.get("proposal") or {}
+    if proposal.get("summary"):
+        notes.append(f"Fix proposed: {proposal['summary']} (decision: {state.get('decision', 'n/a')})")
+    for r in state.get("fix_results") or []:
+        notes.append(f"Fix result: {json.dumps(r, default=str)[:300]}")
+    ticket = tickets.create_ticket(title, summary, category=category, priority=priority,
+                                   task_id=state["task_id"], work_notes="\n".join(notes))
+    audit.log_event(state["task_id"], "ticket", agent=state.get("agent"), detail=ticket)
+    _emit(state.get("agent"), f"Opened ticket {ticket['ref']} for IT")
+    return ticket
 
 
 # ---------------------------------------------------------------------------
 # Nodes
 # ---------------------------------------------------------------------------
 def route_node(state: State) -> dict:
-    task_id, request = state["task_id"], state["request"]
+    task_id = state["task_id"]
+    request, secret_found = redact(state["request"])
+    original = request
+    history = state.get("history") or []
+    if memory.needs_context(request, history):
+        # a follow-up ("close the biggest one"): make it a complete request from the earlier conversation
+        _emit(None, "Reading the earlier conversation")
+        request, more_secrets = redact(memory.standalone(request, history))
+        secret_found = secret_found or more_secrets
+        if request != original:
+            _emit(None, f"Understood as: {request[:120]}")
     audit.start_task(task_id, request)
-    if policy.is_sensitive_request(request):
-        audit.log_event(task_id, "route", agent="refused", detail="Level 3 request refused by policy")
-        return {"agent": "refused", "outcome": "refused", "tool_calls": 0}
+    if request != original:
+        audit.log_event(task_id, "context", detail={"typed": original, "understood_as": request})
+    base = {"request": request, "original_request": original, "secret_found": secret_found, "tool_calls": 0}
+    sensitive = policy.sensitive_reason(request)
+    if sensitive:
+        reasons = policy.sensitive_reasons(request)
+        quick = COMPUTER_USE.quick_pick(request)
+        # Only when it is the ONLY sensitive part of the request:
+        #  - an approved-catalogue install (user approves first)
+        #  - a password reset/unlock, which is answered by opening the official self-service page
+        if quick and ((quick["task"] == "install_software" and reasons == {policy.R3_SOFTWARE})
+                      or (quick["task"] == "password_reset" and reasons == {policy.R3_PASSWORD})):
+            sensitive = None
+    if sensitive:
+        category, why = sensitive
+        audit.log_event(task_id, "route", agent="it_request", detail=f"R3 request, not executed: {why}")
+        ticket = _open_ticket({**state, **base, "agent": "it_request"}, request[:100],
+                              f"{request}\n\nNot done by Tobi: {why}.", category, "P3")
+        return {**base, "agent": "it_request", "outcome": "escalated", "ticket": ticket, "error": why}
+    if state.get("mode") == "autopilot":
+        _emit("autopilot", "Autopilot mode: working it out step by step")
+        return {**base, "agent": "autopilot"}
     _emit(None, "Router is choosing a specialist")
     try:
         choice = router.route(request)
     except ModelError as e:
-        return {"agent": "none", "outcome": "error", "error": str(e), "tool_calls": 0}
+        return {**base, "agent": "none", "outcome": "error", "error": str(e)}
     audit.log_event(task_id, "route", agent=choice["agent"], detail=choice)
     if choice["agent"] == "none":
-        return {"agent": "none", "outcome": "unsupported", "question": choice["question"], "tool_calls": 0}
+        # greetings, thanks, small talk, general or vague messages: a natural reply, not a list of features
+        _emit(None, "Writing a reply")
+        try:
+            return {**base, "agent": "none", "outcome": "chat",
+                    "question": specialists.chat_reply(original, history)}
+        except ModelError as e:
+            return {**base, "agent": "none", "outcome": "error", "error": str(e)}
+    if choice["agent"] == "computer_use" and not COMPUTER_USE.quick_pick(request):
+        # not one of the fixed computer tasks: the general agent can still work it out with its tools
+        try:
+            picked = COMPUTER_USE.pick_task(request)
+        except ModelError:
+            picked = {"task": "none"}
+        if picked["task"] == "none":
+            _emit("autopilot", "This needs a few steps: Autopilot is working it out")
+            return {**base, "agent": "autopilot"}
+        _emit("computer_use", f"Routed to the {LABELS['computer_use']} agent")
+        return {**base, "agent": "computer_use", "cu_choice": picked}
     _emit(choice["agent"], f"Routed to the {LABELS[choice['agent']]} agent")
-    return {"agent": choice["agent"], "tool_calls": 0}
+    return {**base, "agent": choice["agent"]}
 
 
 def diagnose_node(state: State) -> dict:
     agent = state["agent"]
-    spec = SPECIALISTS[agent]
-    runner = _runner(state)
     try:
         if agent == "computer_use":
-            return _diagnose_computer_use(state, spec)
-        diagnostics = {tool: _run(runner, tool) for tool in spec.diagnostic_tools}
-        failed = [f"{t}: {o.get('error')}" for t, o in diagnostics.items() if o.get("ok") is False]
-        if len(failed) == len(diagnostics):
-            return {"diagnostics": diagnostics, "tool_calls": runner.calls_made, "outcome": "error",
-                    "error": "The diagnostic tools failed: " + "; ".join(failed)}
-        _emit(agent, "Writing the diagnosis (the local model can take a minute)")
-        proposal = spec.propose(state["request"], diagnostics)
+            return _diagnose_computer_use(state)
+        if agent == "it_request":
+            return _service_desk(state)
+        if agent == "devices" and printing.is_print_request(state["request"]):
+            return _diagnose_printing(state)
+        return _diagnose(state, DOMAINS[agent])
+    except (ModelError, PolicyError) as e:
+        return {"outcome": "error", "error": str(e)}
+
+
+def _diagnose(state: State, domain) -> dict:
+    agent = domain.name
+    runner = _runner(state)
+    _emit(agent, "Choosing which checks to run")
+    steps = specialists.plan(domain, state["request"])
+    audit.log_event(state["task_id"], "plan", agent=agent, detail=steps)
+    diagnostics = {}
+    for key, step in zip(specialists.diag_keys(steps), steps):
+        diagnostics[key] = _run(runner, step["tool"], step["args"])
+    failed = [f"{t}: {o.get('error')}" for t, o in diagnostics.items() if o.get("ok") is False]
+    if diagnostics and len(failed) == len(diagnostics):
+        return {"plan": steps, "diagnostics": diagnostics, "tool_calls": runner.calls_made, "outcome": "error",
+                "error": "The checks failed: " + "; ".join(failed)}
+    general = agent == "howto" and bool(cfg("rag", "general_knowledge_fallback", default=True))
+    try:
+        if general and not specialists.kb_found_something(diagnostics):
+            proposal = None                       # nothing in the knowledge base: skip straight to general knowledge
+        else:
+            _emit(agent, "Writing the answer (the local model can take a minute)")
+            proposal = specialists.answer(domain, state["request"], diagnostics)
+            if general and proposal["diagnosis"].strip().strip(".").upper() == specialists.NO_KB_ANSWER:
+                proposal = None                   # the articles found do not answer this question
+        if proposal is None:
+            _emit(agent, "Nothing in the knowledge base: answering from general knowledge")
+            proposal = specialists.general_answer(state["request"], state.get("history"))
     except ModelError as e:
-        return {"tool_calls": runner.calls_made, "outcome": "error", "error": str(e)}
-    except PolicyError as e:
-        return {"tool_calls": runner.calls_made, "outcome": "error", "error": str(e)}
+        return {"plan": steps, "diagnostics": diagnostics, "tool_calls": runner.calls_made,
+                "outcome": "error", "error": str(e)}
     audit.log_event(state["task_id"], "proposal", agent=agent, tool=proposal.get("fix"),
                     detail={k: proposal.get(k) for k in ("diagnosis", "summary", "reason")})
-    out = {"diagnostics": diagnostics, "proposal": proposal, "tool_calls": runner.calls_made}
-    if not proposal.get("fix"):
+    out = {"plan": steps, "diagnostics": diagnostics, "proposal": proposal, "tool_calls": runner.calls_made}
+    if not proposal["fix"]:
         out["outcome"] = "no_action"
     return out
 
 
-def _diagnose_computer_use(state: State, spec) -> dict:
+def _diagnose_printing(state: State) -> dict:
+    """Printing: one read-only pass over every layer, then fixes for the computer side and steps for the rest."""
+    runner = _runner(state, "devices")
+    file_name = printing.extract_file_name(state["request"])
+    _emit("devices", "Checking the print service, printers, queue and connection")
+    found = _run(runner, "diagnose_printing", {"file": file_name} if file_name else {}, label="Troubleshooting printing")
+    if found.get("ok") is False:
+        return {"diagnostics": {"diagnose_printing": found}, "tool_calls": runner.calls_made, "outcome": "error",
+                "error": f"The printing checks failed: {found.get('error')}"}
+    proposal = specialists.print_proposal(printing.last())
+    audit.log_event(state["task_id"], "proposal", agent="devices", tool=proposal.get("fix"),
+                    detail={k: proposal.get(k) for k in ("diagnosis", "summary")})
+    out = {"diagnostics": {"diagnose_printing": found}, "proposal": proposal, "tool_calls": runner.calls_made}
+    if not proposal["fix"]:
+        out["outcome"] = "no_action"
+    return out
+
+
+def _service_desk(state: State) -> dict:
+    _emit("it_request", "Reading the request")
+    choice = specialists.intake(state["request"])
+    audit.log_event(state["task_id"], "proposal", agent="it_request", detail=choice)
+    runner = _runner(state)
+    if choice["action"] == "create":
+        ticket = _open_ticket(state, choice["title"], choice["summary"], choice["category"], choice["priority"])
+        return {"ticket": ticket, "outcome": "escalated",
+                "proposal": {"diagnosis": f"I understood your request as: {choice['summary']}", "fix": "escalate"}}
+    if choice["action"] == "status":
+        out = _run(runner, "get_ticket", {"ticket": choice["ticket"]})
+        text = (f"Ticket {out['ref']} \"{out['title']}\" is {out['status']} (priority {out['priority']}, opened "
+                f"{out['created']})." if out.get("ok") else out.get("error", "I could not find that ticket."))
+    else:
+        out = _run(runner, "list_my_tickets")
+        rows = out.get("tickets", [])
+        text = ("You have no tickets yet." if not rows else "Your most recent tickets:\n\n" + "\n".join(
+            f"- **{t['ref']}** {t['title']} — {t['status']}, {t['priority']}, opened {t['created']}" for t in rows))
+    return {"diagnostics": {"tickets": out}, "tool_calls": runner.calls_made, "outcome": "no_action",
+            "proposal": {"diagnosis": text, "fix": None}}
+
+
+def _diagnose_computer_use(state: State) -> dict:
     _emit("computer_use", "Working out which task this is")
-    choice = spec.pick_task(state["request"])
+    choice = state.get("cu_choice") or COMPUTER_USE.pick_task(state["request"])
     audit.log_event(state["task_id"], "proposal", agent="computer_use", detail=choice)
     if choice["task"] == "none":
-        return {"outcome": "unsupported", "question": ""}
+        return {"outcome": "unsupported", "question":
+                "I can open websites, apps and folders, search the web and open a result, install approved software, "
+                "write text you put in quotes into Notepad and save it, write a system health note in Notepad, "
+                "or download the latest report from the test portal. Tell me which one you want, for example "
+                "\"open youtube.com in Chrome\" or \"install 7-Zip\". For anything else, tell me what the problem is."}
+    if policy.is_read_only():
+        return {"outcome": "refused", "error": "Read-only mode is on, so no changes can be made."}
+    try:
+        if choice["task"] == "open_website":
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_website(choice)}
+        if choice["task"] == "open_app":
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_app(choice["app"])}
+        if choice["task"] == "write_note":
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_write_note(choice)}
+        if choice["task"] == "open_folder":
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_folder(choice["folder"])}
+        if choice["task"] == "search_web":
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_search_web(choice)}
+        if choice["task"] == "find_site":
+            # Search agent: look the site up on the web first (read-only), then propose opening the best match.
+            wr = _runner(state, "web")
+            found = _run(wr, "web_search", {"query": f"{choice['query']} official website"},
+                         label=f"Searching the web for {choice['query']}")
+            return {"diagnostics": {"web_search": found}, "tool_calls": wr.calls_made,
+                    "proposal": COMPUTER_USE.plan_find_site(choice, found.get("results") or [], found.get("error", ""))}
+        if choice["task"] == "install_software":
+            proposal = COMPUTER_USE.plan_install(choice["package"])
+            return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
+    except (ValueError, PolicyError) as e:
+        return {"outcome": "refused", "error": f"{e}."}
+    if choice["task"] == "password_reset":
+        try:
+            return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_password_reset()}
+        except PolicyError as e:
+            return {"outcome": "refused", "error": f"{e}."}
     if choice["task"] == "browser_task":
-        return {"diagnostics": {}, "proposal": spec.plan_browser_task(choice["task_id"])}
+        return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_browser_task(choice["task_id"])}
     # The health numbers come from the Performance and Storage agents' read-only tools.
     perf = _runner(state, "performance")
     health = _run(perf, "get_system_health", label="Collecting system health")
@@ -122,20 +300,15 @@ def _diagnose_computer_use(state: State, spec) -> dict:
         return {"tool_calls": stor.calls_made, "outcome": "error",
                 "error": f"Could not read the system health: {health.get('error')}"}
     return {"diagnostics": {"get_system_health": health, "get_disk_usage": disks},
-            "proposal": spec.plan_health_note(health, disks), "tool_calls": stor.calls_made}
+            "proposal": COMPUTER_USE.plan_health_note(health, disks), "tool_calls": stor.calls_made}
 
 
 def gate_node(state: State) -> dict:
-    """Policy gate: Python checks risk level, allow-lists and the tool budget before anything pauses or runs."""
+    """Policy gate: Python checks tier, allow-lists, read-only mode and the tool budget before anything pauses or runs."""
     steps = state["proposal"]["steps"]
     try:
         for step in steps:
-            spec = TOOLS.get(step["tool"])
-            if spec is None or spec.agent != state["agent"]:
-                raise PolicyError(f"'{step['tool']}' is not a tool of the {LABELS[state['agent']]} agent")
-            if spec.risk_level >= policy.SENSITIVE:
-                raise PolicyError("This is a sensitive (Level 3) action. Please contact IT.")
-            policy.check_args(step["tool"], step["args"])
+            step["args"] = policy.check_step(step.get("domain") or state["agent"], step["tool"], step["args"])
         limit = int(cfg("limits", "max_tool_calls_per_request", default=10))
         if state.get("tool_calls", 0) + len(steps) > limit:
             raise PolicyError(f"This plan needs more than the {limit} tool calls allowed per request")
@@ -153,20 +326,29 @@ def approval_node(state: State) -> dict:
         "diagnosis": proposal["diagnosis"],
         "summary": proposal["summary"],
         "what_changes": proposal["what_changes"],
+        "risk": proposal.get("risk", policy.R1),
         "steps": [s["label"] for s in proposal["steps"]],
     })
     approved = bool(answer.get("approved")) if isinstance(answer, dict) else bool(answer)
     decision = "approved" if approved else "rejected"
     audit.log_event(state["task_id"], "approval", agent=state["agent"], tool=proposal["fix"],
-                    args=[s["args"] for s in proposal["steps"]], risk_level=policy.NEEDS_APPROVAL, detail=decision)
+                    args=[s["args"] for s in proposal["steps"]], risk_level=proposal.get("risk", policy.R1),
+                    detail=decision)
     return {"decision": decision, **({} if approved else {"outcome": "rejected"})}
 
 
 def execute_node(state: State) -> dict:
+    if state["proposal"]["fix"] == "escalate":   # the approved action is "open a ticket"
+        ticket = _open_ticket(state, state["request"][:100],
+                              f"{state['request']}\n\nTobi's finding: {state['proposal']['diagnosis']}",
+                              "security" if state["agent"] == "security" else "incident")
+        return {"ticket": ticket, "outcome": "escalated"}
     runner = _runner(state)
     results = []
     for step in state["proposal"]["steps"]:
         try:
+            if step.get("domain"):      # a step may use a tool from another domain (for example the directory connector)
+                runner.agent = step["domain"]
             result = _run(runner, step["tool"], step["args"], approved=True, label=step["label"])
         except PolicyError as e:
             result = {"ok": False, "error": str(e)}
@@ -178,57 +360,71 @@ def execute_node(state: State) -> dict:
 
 def verify_node(state: State) -> dict:
     agent = state["agent"]
-    _emit(agent, "Checking the result: running the diagnostic again")
+    _emit(agent, "Checking the result: running the checks again")
     runner = _runner(state)
     try:
-        v = SPECIALISTS[agent].verify(runner, state)
+        v = specialists.verify(runner, state)
     except PolicyError as e:
-        return {"outcome": "not_fixed", "verify_note": f"Could not verify: {e}", "tool_calls": runner.calls_made}
+        v = {"comparison": [], "fixed": False, "note": f"Could not verify: {e}"}
     # A fix whose step failed is never reported as fixed, whatever the re-check shows.
-    step_failed = any(r.get("ok") is False for r in state.get("fix_results", []))
-    if step_failed:
+    if any(r.get("ok") is False for r in state.get("fix_results", [])):
         v["fixed"] = False
         v["note"] = "The fix did not complete, so the problem is not confirmed as solved."
     audit.log_event(state["task_id"], "result", agent=agent, detail=v)
-    return {"comparison": v["comparison"], "verify_note": v["note"],
-            "outcome": "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
+    out = {"comparison": v["comparison"], "verify_note": v["note"],
+           "outcome": "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
+    if not v["fixed"]:
+        merged = {**state, **out}
+        out["ticket"] = _open_ticket(merged, state["request"][:100],
+                                     f"{state['request']}\n\nTobi tried: {state['proposal'].get('summary')}. "
+                                     f"Result: {v['note']}", "incident", "P3")
+    return out
 
 
 def _alternatives(agent: str) -> str:
     return {
-        "performance": "Other options: save your work and close the app yourself, restart the computer, or contact IT.",
-        "storage": "Other options: empty the Recycle Bin, move large files to a network or cloud folder, or contact IT.",
-        "network": "Other options: turn Wi-Fi off and on, restart the computer, or contact IT.",
+        "performance": "Other options: save your work and close the app yourself, restart the computer, or ask me to raise a ticket.",
+        "storage": "Other options: empty the Recycle Bin, move large files to a network or cloud folder, or ask me to raise a ticket.",
+        "network": "Other options: turn Wi-Fi off and on, restart the computer, or ask me to raise a ticket.",
         "computer_use": "You can do the task by hand, or ask again with different wording.",
-    }.get(agent, "")
+    }.get(agent, "You can make the change yourself, or ask me to raise a ticket for IT.")
+
+
+def _ticket_line(ticket: dict | None) -> str:
+    if not ticket:
+        return ""
+    return (f"I opened ticket **{ticket['ref']}** (priority {ticket['priority']}) for the IT team with everything "
+            "I found, so you do not need to explain it again. Ask me \"status of " + ticket["ref"] + "\" any time.")
 
 
 def report_node(state: State) -> dict:
     outcome = state.get("outcome", "error")
     agent = state.get("agent")
     proposal = state.get("proposal") or {}
+    ticket = state.get("ticket")
     parts = []
-    if outcome == "refused" and agent == "refused":
-        parts.append("I can't help with this request. It involves a sensitive change (for example installing "
-                     "software, passwords, permissions, security settings, the registry or deleting your files). "
-                     "Please contact IT.")
+    if outcome == "escalated" and not proposal:
+        parts.append(f"I can't do this myself. {state.get('error')}.")
+        parts.append(_ticket_line(ticket))
+    elif outcome == "escalated":
+        parts.append(proposal.get("diagnosis", ""))
+        parts.append(_ticket_line(ticket))
     elif outcome == "refused":
-        parts.append(f"The safety policy blocked this action: {state.get('error')} Nothing was changed. Please contact IT.")
+        parts.append(f"The safety policy blocked this action: {state.get('error')} Nothing was changed.")
+    elif outcome == "chat":
+        parts.append(state.get("question") or "Hi! What can I help you with today?")
     elif outcome == "unsupported":
         parts.append(state.get("question") or
-                     "This request is not supported. I can help with a slow computer, a full disk, internet or "
-                     "DNS problems, writing a system health note in Notepad, and downloading the test portal report.")
+                     "I did not understand that as an IT request. Tell me what is wrong with your computer, "
+                     "account, network, printer or software, or ask me how to do something.")
     elif outcome == "error":
         parts.append(f"I had to stop: {state.get('error')} Nothing was changed.")
     else:
         parts.append(proposal.get("diagnosis", ""))
-        if outcome == "no_action":
-            parts.append("No fix is needed or available from my tool list, so nothing was changed. "
-                         + (proposal.get("reason") or ""))
-        elif outcome == "rejected":
-            parts.append(f"You rejected the fix ({proposal.get('summary')}), so nothing was changed. "
+        if outcome == "rejected":
+            parts.append(f"You rejected the change ({proposal.get('summary')}), so nothing was changed. "
                          + _alternatives(agent))
-        else:
+        elif outcome in ("fixed", "not_fixed"):
             failed = [r for r in state.get("fix_results", []) if r.get("ok") is False]
             parts.append(f"Action taken: {proposal.get('summary')}.")
             if failed:
@@ -236,8 +432,11 @@ def report_node(state: State) -> dict:
             if outcome == "fixed":
                 parts.append(f"Verified: {state.get('verify_note')}")
             else:
-                parts.append(f"The problem remains: {state.get('verify_note')} I will not retry. "
-                             "Please contact IT so they can look into it.")
+                parts.append(f"The problem remains: {state.get('verify_note')} I will not retry.")
+                parts.append(_ticket_line(ticket))
+    if state.get("secret_found"):
+        parts.append("⚠️ Your message contained what looks like a password or key. I removed it before reading "
+                     "or logging the message. Never share passwords in chat; if it was real, change it now.")
     report = "\n\n".join(p.strip() for p in parts if p and p.strip())
     audit.log_event(state["task_id"], "report", agent=agent, detail={"outcome": outcome, "report": report})
     audit.finish_task(state["task_id"], agent, outcome, report)
@@ -251,6 +450,18 @@ def _next_or_report(next_node: str):
     return lambda state: "report" if state.get("outcome") else next_node
 
 
+def _after_route(state: State) -> str:
+    if state.get("outcome"):
+        return "report"
+    return "auto_think" if state.get("agent") == "autopilot" else "diagnose"
+
+
+def _after_think(state: State) -> str:
+    if state.get("outcome") or state.get("auto_next") == "final":
+        return "report"
+    return "auto_run" if state.get("auto_next") == "run" else "auto_approval"
+
+
 def build_graph(checkpointer=None):
     g = StateGraph(State)
     g.add_node("route", route_node)
@@ -260,12 +471,19 @@ def build_graph(checkpointer=None):
     g.add_node("execute", execute_node)
     g.add_node("verify", verify_node)
     g.add_node("report", report_node)
+    g.add_node("auto_think", autopilot.think_node)
+    g.add_node("auto_approval", autopilot.approval_node)
+    g.add_node("auto_run", autopilot.run_node)
     g.add_edge(START, "route")
-    g.add_conditional_edges("route", _next_or_report("diagnose"), ["diagnose", "report"])
+    g.add_conditional_edges("route", _after_route, ["diagnose", "auto_think", "report"])
+    g.add_conditional_edges("auto_think", _after_think, ["auto_run", "auto_approval", "report"])
+    g.add_conditional_edges("auto_approval", lambda s: "auto_run" if s.get("auto_approved") else "auto_think",
+                            ["auto_run", "auto_think"])
+    g.add_edge("auto_run", "auto_think")
     g.add_conditional_edges("diagnose", _next_or_report("gate"), ["gate", "report"])
     g.add_conditional_edges("gate", _next_or_report("approval"), ["approval", "report"])
     g.add_conditional_edges("approval", _next_or_report("execute"), ["execute", "report"])
-    g.add_edge("execute", "verify")
+    g.add_conditional_edges("execute", _next_or_report("verify"), ["verify", "report"])
     g.add_edge("verify", "report")
     g.add_edge("report", END)
     if checkpointer is None:

@@ -10,6 +10,22 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 
 
+def _load_dotenv() -> None:
+    """Read KEY=VALUE lines from ROOT/.env into the environment (real environment variables win)."""
+    path = ROOT / ".env"
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
+
 @lru_cache(maxsize=1)
 def load_config() -> dict:
     path = Path(os.environ.get("IT_BUDDY_CONFIG", ROOT / "config.yaml"))

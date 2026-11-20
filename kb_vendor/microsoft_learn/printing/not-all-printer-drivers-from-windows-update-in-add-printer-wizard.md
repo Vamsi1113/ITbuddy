@@ -1,0 +1,45 @@
+<!-- source: https://learn.microsoft.com/en-us/troubleshoot/windows-client/printing/not-all-printer-drivers-from-windows-update-in-add-printer-wizard -->
+# Not all printer drivers from Windows Update appear in Add Printer wizard
+
+Works around an issue in which not all printer drivers that are downloaded from Windows Update are listed when in the Add Printer wizard.
+
+This article provides a workaround for an issue in which not all printer drivers that are downloaded from Windows Update are listed in the Add Printer wizard.
+
+_Original KB number:_   4508350
+
+## Symptoms
+
+On a computer that is running Windows 10, version 1803, Windows Server, version 1803 or a later version of Windows, you do the following operations:
+
+1. Select **Start**, type *Control Panel*, and then press Enter.
+2. In Control Panel, select the **View Devices and Printers** item.
+
+3. Select **Add Printer** at the top of the window.
+
+4. After the wizard started, select **The printer that I want isn't listed**.
+5. Select **Add a local printer or network printer with manual settings**, and then select **Next**.
+6. On the **Choose a Printer Port** page, select the desired port, and then select **Next**.
+7. On the **Install the printer driver** page, select **Windows Update**.
+8. The updated **Printers** list is displayed from Windows Update. For example, if you select **KONICA MINOLTA**  under **Manufacturer**, the **Printers** list is displayed as follows.
+
+In this scenario, not all registered drivers are displayed.
+
+For example, "KONICA MINOLTA PS BW Laser Class Driver" and "KONICA MINOLTA PS Color Laser Class Driver" are not both displayed as expected.
+
+## Workaround
+
+To work around this issue, manually download and install the printer driver to be installed from the Windows Update Catalog. In the example of the driver mentioned in the Symptoms section, install according to the following procedure.
+
+1. Go to the Windows Update Catalog.
+2. In the search box, enter the keyword of the driver to be downloaded, such as "Windows 10 KONICA MINOLTA PS BW Laser Class Driver," and then select **Search**.
+3. After the list is displayed, select the **Download** button for the target driver, and save it to any folder.
+
+4. Extract the saved .cab file to any folder.
+5. Do steps 1 through 6 in the Symptoms section.
+6. On the **Install the printer driver** screen, select **Have disk**.
+
+7. Browse to the folder that was extracted in step 4, and then select the **OK**.
+
+8. After the printer driver list appears, select the target driver, and then select **Next** to go through the remaining wizard steps and complete all installation tasks. Contact your printer vendor for more information about which printer driver must be downloaded for the printer that you are using.
+
+_Source: Microsoft Learn, licensed CC BY 4.0._

@@ -9,6 +9,13 @@ import sys
 from agent import runner
 from agent.graph import build_graph
 
+# RAG: ensure the index is current before each CLI run (synchronous, fast if no changes)
+try:
+    from rag.startup import ensure_rag_index
+    ensure_rag_index(background=False)
+except Exception:
+    pass
+
 
 def _status(event: dict) -> None:
     tool = f" [{event['tool']}]" if event.get("tool") else ""
@@ -16,12 +23,13 @@ def _status(event: dict) -> None:
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if a not in ("--yes", "--no")]
+    args = [a for a in sys.argv[1:] if a not in ("--yes", "--no", "--auto")]
+    mode = "autopilot" if "--auto" in sys.argv else None
     auto = True if "--yes" in sys.argv else False if "--no" in sys.argv else None
     request = " ".join(args).strip() or input("Describe your problem: ").strip()
     graph = build_graph()
-    result = runner.start(graph, request, _status)
-    if result["status"] == "needs_approval":
+    result = runner.start(graph, request, _status, mode=mode)
+    while result["status"] == "needs_approval":     # Autopilot can ask several times
         a = result["approval"]
         print(f"\nDiagnosis ({a['agent']}): {a['diagnosis']}")
         print(f"\nProposed fix: {a['summary']}\nWhat will change: {a['what_changes']}\nSteps:")
@@ -29,8 +37,10 @@ def main() -> int:
             print(f"  {i}. {step}")
         if auto is None:
             auto = input("\nApprove? [y/N] ").strip().lower() in ("y", "yes")
-        print("-> Approved" if auto else "-> Rejected")
-        result = runner.resume(graph, result["task_id"], auto, _status)
+        answer = auto
+        print("-> Approved" if answer else "-> Rejected")
+        result = runner.resume(graph, result["task_id"], answer, _status)
+        auto = auto if sys.argv.count("--yes") or sys.argv.count("--no") else None
     state = result["state"]
     print(f"\nOutcome: {state.get('outcome')}\n\n{state.get('report')}")
     if state.get("comparison"):

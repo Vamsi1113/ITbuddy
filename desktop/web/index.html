@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tobi</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" class="app" data-live="closed" data-side="left">
+
+  <!-- live view: pulled out from the side of the chat -->
+  <aside id="live" class="live" aria-label="Live view">
+    <header class="live-head">
+      <span class="live-title">Live view</span>
+      <span id="live-badge" class="badge idle">Waiting</span>
+    </header>
+    <div id="live-shot" class="live-shot empty">
+      <p>When I open a website, a folder or a file, you will see it here.</p>
+    </div>
+    <div id="live-feed" class="live-feed"></div>
+  </aside>
+
+  <section id="chat" class="chat">
+    <header class="head">
+      <div class="bar">
+        <div class="tools">
+          <button class="icon" data-sheet="agents" title="Agents" aria-label="Agents"></button>
+          <button class="icon" data-sheet="connectors" title="Connectors" aria-label="Connectors"></button>
+          <button class="icon" data-sheet="tools" title="Tools" aria-label="Tools"></button>
+        </div>
+        <div class="win">
+          <button class="icon" id="btn-menu" title="Settings" aria-label="Settings"></button>
+          <button class="icon" id="btn-pin" title="Keep on top" aria-label="Keep on top"></button>
+          <button class="icon" id="btn-min" title="Minimise" aria-label="Minimise"></button>
+          <button class="icon close" id="btn-close" title="Close" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="brand">
+        <div class="avatar"><img id="logo" alt=""><i class="dot"></i></div>
+        <div class="who">
+          <div class="name">Tobi</div>
+          <div id="status" class="status">online</div>
+        </div>
+      </div>
+    </header>
+
+    <main id="stream" class="stream" aria-live="polite"></main>
+
+    <div id="suggest" class="suggest"></div>
+
+    <footer class="composer">
+      <div class="field">
+        <textarea id="input" rows="1" placeholder="Message Tobi" aria-label="Message"></textarea>
+        <button id="send" class="send" title="Send" aria-label="Send" disabled></button>
+      </div>
+    </footer>
+
+    <!-- slide-over sheets -->
+    <section class="sheet" id="sheet-agents"></section>
+    <section class="sheet" id="sheet-connectors"></section>
+    <section class="sheet" id="sheet-tools"></section>
+
+    <!-- settings menu -->
+    <div id="menu" class="menu" hidden>
+      <label class="opt"><span>Autopilot<small>One agent plans every request</small></span><input type="checkbox" id="opt-autopilot"></label>
+      <label class="opt"><span>Live view<small>Screenshots of what I do</small></span><input type="checkbox" id="opt-live" checked></label>
+      <label class="opt"><span>Read-only<small>Look, never change</small></span><input type="checkbox" id="opt-readonly"></label>
+      <button class="opt link" id="opt-console"><span>Open full console<small>The web version in your browser</small></span></button>
+      <button class="opt link" id="opt-quit"><span>Quit Tobi<small>Close the avatar and the chat</small></span></button>
+      <button class="opt link" id="opt-new"><span>New chat<small>Clear this conversation</small></span></button>
+    </div>
+  </section>
+
+  <button id="pull" class="pull" title="Live view" aria-label="Show live view"></button>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

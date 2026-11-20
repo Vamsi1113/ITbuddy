@@ -1,0 +1,173 @@
+<!-- source: https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/fix-problems-in-windows-search -->
+# Fix problems in Windows Search
+
+Provides troubleshooting options for problems that affect the search results for the Windows Search feature in Windows 11 and Windows 10.
+
+> <a href="https://vsa.services.microsoft.com/v1.0/?partnerId=7d74cf73-5217-4008-833f-87a1a278f2cb&flowId=DMC&initialQuery=31806433" target='_blank'>Try our Virtual Agent</a> - It can help you quickly identify and fix common Windows Search issues.
+
+If Windows Search is unresponsive or the search results don't appear as expected, try any of the following solutions.
+
+_Original KB number:_ 4520146
+
+## Solution 1: Restart Windows Font Cache Service
+
+Sometimes, you can resolve Windows Search issues by restarting Windows Font Cache Service. To do this, follow these steps:
+
+1. In the search box on the taskbar, enter *services.msc* to open the Services console.
+2. In the right pane, right-click **Windows Font Cache Service**, and then select **Stop**.
+3. Try to search again.
+4. In the Services console, right-click **Windows Font Cache Service**, and then select **Start**.
+
+## Solution 2: Check for updates
+
+When you use Windows 11 or Windows 10, you can choose when and how to get the latest updates to keep your device running smoothly and securely. To manage your options and see any available updates, select **Start** > **Settings** > **Update & Security** > **Windows Update** > **Check for updates**. Install any available updates, and then restart your computer if the updates require it.
+
+For more information, see Update Windows.
+
+## Solution 3: Run the Search and Indexing troubleshooter
+
+Windows automatically indexes content to deliver faster search results. If you're running Windows 10, version 1903 (May 2019 Update) or a later version, and Windows detects a problem, Windows automatically runs the Search troubleshooter. This troubleshooter resets Windows Search to the default experience. To view your troubleshooter history, select **Start** > **Settings** > **Update & Security** > **Troubleshoot** > **View troubleshooting history**.
+
+Use the Windows Search and Indexing troubleshooter to try to fix any problems that might arise. To use the troubleshooter, follow these steps:
+
+1. Open a Command Prompt window, and then run the following command:
+
+   ```console
+   msdt.exe -ep WindowsHelp id SearchDiagnostic
+   ```
+
+1. Run the troubleshooter and select any problems that apply. Windows tries to detect and solve those problems.
+
+For more information about Search and Indexing, see the following articles:
+
+- Performance issues that affect Windows Search and Search indexing.
+- Search indexing in Windows 10: FAQ.
+
+## Solution 4: Restart Windows Search
+
+Follow these steps to end the **SearchUI.exe** (Windows 10) or **SearchHost.exe** (Windows 11) process. Stopping this process stops Windows Search. The next time that you search, Windows Search automatically starts.
+
+1. Select Ctrl+Alt+Delete, and then select **Task Manager**.
+2. In **Task Manager**, select **Details**.
+3. In the **Name** column, right-click the **SearchUI.exe** or **SearchHost.exe** process, and then select **End task**.
+4. When you're prompted to end the **SearchUI.exe** or **SearchHost.exe** process, select **End process**.
+
+If this solution doesn't fix your problem, try restarting your device. Restarting also installs any pending updates.
+
+> Note:
+> Before you restart, consider bookmarking this page.
+
+## Solution 5: Reset Windows Search
+
+Try resetting Windows Search by using the method that's appropriate for your version of Windows. To determine which version of Windows your device is running, follow these steps:
+
+1. Select **Start** > **Settings** > **System** > **About**.
+2. Under **Windows specifications**, check which version of Windows your device is running.
+
+> Note:
+> Resetting Windows Search doesn't affect your files. However, it may temporarily affect the relevance of search results.
+
+### Reset Windows Search when using Windows 10, version 1809 or an earlier version
+
+If the computer runs Windows 10 October 2018 Update or an earlier update, follow these steps to reset Windows Search by resetting Cortana:
+
+1. Select **Start**, right-click **Cortana**, and then select **More** > **App settings**.
+2. In the Cortana settings, select **Reset**.
+
+### Reset Windows Search when using Windows 11, Windows 10, version 1903, or a later version
+
+If the computer runs Windows 11, Windows 10 May 2019 Update, or a later update, you can use a Windows PowerShell script to reset Windows Search.
+
+> Important:
+>
+> - You must have administrator permissions to run this script.
+> - If your organization has disabled the ability to run scripts, contact your administrator for help.
+
+To reset Windows Search by using PowerShell, follow these steps:
+
+1. Check the Windows PowerShell execution policy on the affected computer. To allow the script to run, the execution policy must be set to **Unrestricted**.
+
+   1. To check the execution policy, open an elevated PowerShell window, and then run the following cmdlet:
+
+      ```powershell
+      Get-ExecutionPolicy
+      ```
+
+   1. If the execution policy is **Unrestricted**, go to step 2. Otherwise, record the value for later use. Then, run the following cmdlet:
+
+      ```powershell
+      Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Unrestricted
+      ```
+
+      > Important:
+      > This cmdlet generates a warning message that explains the security risks of an execution policy change. To accept the change, select Y, and then select Enter.
+
+      To learn more about PowerShell execution policies, see About Execution Policies.
+
+   1. After the policy change finishes, close the PowerShell window.
+
+1. Download *ResetWindowsSearchBox.ps1* from Reset Windows Search PowerShell script, and save the file to a local folder.
+
+1. Right-click the file that you saved, and then select **Run with PowerShell**.
+1. If you're asked the following question, select **Yes**.
+
+   > Do you want to allow this app to make changes to your device?
+
+   The PowerShell script resets the Windows Search feature.
+
+1. When the word **Done** appears, do one of the following:
+
+   - If you didn't change the execution policy to run the script, close the PowerShell window.
+   - If you changed the execution policy, keep the PowerShell window open and select any key to continue. Run the following command in the PowerShell window:
+
+      ```powershell
+      Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy <PreviousValue>
+      ```
+
+       In this command, `<PreviousValue>` represents the original value of the `Get-ExecutionPolicy` cmdlet. As you did previously, accept the policy change by selecting Y and then selecting Enter.
+
+1. Close the PowerShell Window.
+
+> Note:
+> If the execution policy is not set correctly, you receive a message that resembles the following:
+>
+> `Cannot be loaded because running scripts is disabled on this system.`
+>
+> Return to the earlier steps in this procedure to check the execution policy and change it if needed. Then, run the script again.
+
+## Solution 6: Regenerate the Microsoft.Windows.Search package AppData folder
+
+> Note:
+> Use the Windows Recovery Environment, or sign out and then sign in to another user account.
+
+1. Make sure that Windows Search works for a newly created Windows account.
+1. If you're using Windows 10, delete the *%USERPROFILE%\\AppData\\Local\\Packages\\Microsoft.Windows.Search_cw5n1h2txyewy* folder.
+
+   If you're using Windows 11, delete the *%USERPROFILE%\\AppData\\Local\\Packages\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy* folder.
+
+   > Note:
+   > In some earlier versions of Windows, this folder is named *Microsoft.Windows.Cortana_cw5n1h2txyewy*.
+1. While you're signed in by using the affected account, start Registry Editor, and then navigate to the `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Search` subkey.
+1. Delete the `Search` registry key.
+1. Open an elevated PowerShell Window, and then run the following cmdlet based on your Windows version:
+
+   Windows 10:
+
+   ```PowerShell
+   Add-AppxPackage -Path "C:\Windows\SystemApps\Microsoft.Windows.Search_cw5n1h2txyewy\Appxmanifest.xml" -DisableDevelopmentMode -Register
+   ```
+
+   Windows 11:
+
+   ```PowerShell
+   Add-AppxPackage -Path "C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\Appxmanifest.xml" -DisableDevelopmentMode -Register
+   ```
+
+1. Restart the computer.
+1. Try to search again. This action restarts search indexing and regenerates the registry key and the *AppData* folder.
+
+## Help us improve Search in Windows
+
+If the previous suggestions don't fix the problem, let us know by sending feedback in the Feedback Hub. Provide details, such as a description of the problem, screenshots, log files, and any other information that might be helpful. In the Feedback Hub, select the appropriate category and subcategory. In this case, submit your feedback in the **Desktop Environment** category and the **Search** subcategory.
+
+_Source: Microsoft Learn, licensed CC BY 4.0._

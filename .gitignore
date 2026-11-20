@@ -1,6 +1,8 @@
+.env
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-data/
 .streamlit/secrets.toml
+# local runtime data: audit log, checkpoints, RAG index, screenshots, logs (rebuilt automatically)
+data/

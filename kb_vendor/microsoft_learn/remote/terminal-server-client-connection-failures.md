@@ -1,0 +1,39 @@
+<!-- source: https://learn.microsoft.com/en-us/troubleshoot/windows-client/remote/terminal-server-client-connection-failures -->
+# Troubleshooting RDP Client connection problems
+
+Describes various causes for Terminal Server Client connection failures.
+
+This article describes various symptoms for Remote Desktop Client connection failures.
+
+_Original KB number:_   186645
+
+## Summary
+
+This article summarizes the various causes for Terminal Server Client connection failures.
+
+## More information
+
+Terminal Server Client (Remote Desktop Client) connection failures such as "Unable to RDP, "Remote Desktop Disconnected," or "Unable to Connect to Remote Desktop (Terminal server)" are common problems that we have seen in product support. This article summarizes the various causes for such failures.
+
+The following are some of the commonly seen symptoms:
+
+- You may be limited in the number of users who can connect simultaneously to a Remote Desktop session or Remote Desktop Services session.
+- You may have a port assignment conflict.
+- You may have an incorrectly configured Authentication and Encryption setting.
+- You may have a certificate corruption.
+
+All the steps are documented in these articles, based on the server operating system:
+
+- Server 2003: Remote Desktop disconnected or can't connect to remote computer or Remote Desktop server (Terminal Server) that is running Windows Server 2003
+- Server 2008: General Remote Desktop connection troubleshooting
+- Server 2008 R2: Troubleshoot "Remote desktop disconnected" errors in Windows Server 2008 R2
+
+Additionally, we have more symptoms documented in the following Microsoft TechNet article:
+
+Troubleshooting General Remote Desktop Error messages
+
+## Data collection
+
+If you need assistance from Microsoft support, we recommend you collect the information by following the steps mentioned in Gather information by using TSS for User Experience issues.
+
+_Source: Microsoft Learn, licensed CC BY 4.0._

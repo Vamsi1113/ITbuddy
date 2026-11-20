@@ -1,6 +1,22 @@
-# IT Buddy configuration. Allow-lists and limits live here, and only here.
+# Tobi configuration. Allow-lists and limits live here, and only here.
 
 model:
+  # "nvidia" = NVIDIA-hosted Nemotron through the OpenAI-compatible API (key in .env as NVIDIA_API_KEY).
+  # "ollama" = the local model below. Prompts sent to the cloud are redacted of passwords, tokens and keys,
+  # but they do contain the request text and the tool results (system data) - use "ollama" for data that
+  # must stay on this machine.
+  provider: nvidia
+  nvidia:
+    base_url: https://integrate.api.nvidia.com/v1
+    name: nvidia/nemotron-3-ultra-550b-a55b          # strongest; about 4 s per call
+    fallback_name: nvidia/nemotron-3.5-super-vl-120b-a12b   # tried if the first is busy or errors
+    # moonshotai/kimi-k3.1-pro also works with this key: put it in `name` to use Kimi instead.
+    api_key_env: NVIDIA_API_KEY
+    max_tokens: 4096          # reasoning models spend part of this on thinking
+    temperature: 0
+    fallback_to_ollama: true  # use the local model below if the cloud cannot be reached
+    extra_body: {}            # extra request fields, for example {reasoning_effort: low}
+  # --- local Ollama model (used when provider is "ollama", or as the fallback) ---
   # PRD target is qwen3:8b (fallback qwen3:4b). This VM has qwen2.5:7b pulled and
   # too little free disk for qwen3:8b, so it is the default until disk is freed.
   name: qwen2.5:7b
@@ -72,6 +88,11 @@ storage:
     - "C:\\Windows\\Temp"
   # Files modified more recently than this are left alone (they may be in use).
   min_file_age_minutes: 60
+  # The only cache folders clear_app_cache may empty.
+  app_caches:
+    edge: '%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache'
+    chrome: '%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache'
+    teams: '%LOCALAPPDATA%\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\Default\Cache'
 
 network:
   public_ping_host: 1.1.1.1
@@ -83,9 +104,53 @@ network:
 
 desktop:
   # name -> executable. Only these apps can be opened.
+  # A value ending in ":" is a Windows URI (opened with the shell); anything else is an executable name that is
+  # looked up on PATH and in the Windows "App Paths" registry. Add your own apps here.
   allowed_apps:
     notepad: notepad.exe
     calculator: calc.exe
+    paint: mspaint.exe
+    explorer: explorer.exe
+    chrome: chrome.exe
+    edge: msedge.exe
+    firefox: firefox.exe
+    word: winword.exe
+    excel: excel.exe
+    powerpoint: powerpnt.exe
+    outlook: outlook.exe
+    onenote: onenote.exe
+    teams: ms-teams.exe
+    vscode: code.exe
+    vs code: code.exe
+    visual studio code: code.exe
+    snipping tool: snippingtool.exe
+    task manager: taskmgr.exe
+    control panel: control.exe
+    camera: "microsoft.windows.camera:"
+    zoom: zoom.exe
+    notepad++: notepad++.exe
+    7-zip: 7zFM.exe
+  # Browsers open_website can use (name -> executable). "default" always works and uses the Windows default.
+  search_url: https://www.google.com/search?q={q}
+  browsers:
+    chrome: chrome.exe
+    edge: msedge.exe
+    firefox: firefox.exe
+  # Friendly names the user may say instead of an address.
+  website_aliases:
+    youtube: https://www.youtube.com
+    google: https://www.google.com
+    gmail: https://mail.google.com
+    outlook web: https://outlook.office.com
+    office: https://www.office.com
+    github: https://github.com
+    linkedin: https://www.linkedin.com
+    wikipedia: https://www.wikipedia.org
+    stackoverflow: https://stackoverflow.com
+    chatgpt: https://chatgpt.com
+    claude: https://claude.ai
+    teams web: https://teams.microsoft.com
+    sharepoint: https://www.office.com/launch/sharepoint
   # Window titles (regex, case-insensitive) the agent may interact with.
   allowed_windows:
     - "notepad"
@@ -104,3 +169,130 @@ browser:
   download_folder: "%USERPROFILE%\\Downloads"
   allowed_tasks:
     download_latest_report: "Open the test portal and download the latest report"
+
+# ---- added for the extended capability set -------------------------------------------------
+
+safety:
+  # true = the agent may only read. Every change is blocked (global kill switch).
+  read_only_mode: false
+
+software:
+  # Approved software catalogue. An entry with a winget_id can be installed by Tobi after the user approves
+  # (winget, silent, exact id). Entries without one are requested through a ticket. `aliases` are other names users say; `match` is the text to look
+  # for in the installed-programs list to confirm the install worked.
+  approved_catalog:
+    - {name: "Google Chrome", aliases: [chrome], winget_id: "Google.Chrome", match: "Google Chrome", how_to_get: "Standard on all laptops"}
+    - {name: "Mozilla Firefox", aliases: [firefox], winget_id: "Mozilla.Firefox", match: "Firefox", how_to_get: "No approval needed"}
+    - {name: "Zoom", winget_id: "Zoom.Zoom", match: "Zoom", how_to_get: "No approval needed"}
+    - {name: "Microsoft Teams", aliases: [teams], winget_id: "Microsoft.Teams", match: "Teams", how_to_get: "Standard on all laptops"}
+    - {name: "7-Zip", aliases: [7zip, 7 zip], winget_id: "7zip.7zip", match: "7-Zip", how_to_get: "No approval needed"}
+    - {name: "Visual Studio Code", aliases: [vscode, vs code], winget_id: "Microsoft.VisualStudioCode", match: "Visual Studio Code", how_to_get: "Developers only"}
+    - {name: "Notepad++", aliases: [notepad plus plus], winget_id: "Notepad++.Notepad++", match: "Notepad++", how_to_get: "No approval needed"}
+    - {name: "VLC", aliases: [vlc media player], winget_id: "VideoLAN.VLC", match: "VLC", how_to_get: "No approval needed"}
+    - {name: "Adobe Acrobat Pro", how_to_get: "Software request ticket; needs manager approval (paid licence)"}
+
+security:
+  # Domains treated as genuine by check_suspicious_link.
+  trusted_domains: [microsoft.com, office.com, live.com, google.com, apple.com, amazon.com, paypal.com,
+                    linkedin.com, dropbox.com, docusign.com, adobe.com, okta.com, netflix.com, dhl.com, fedex.com]
+
+# ---- Connectors: what Tobi can reach beyond the built-in diagnostics ----------------------------------
+# enabled: true/false switches a connector on. Credentials are never stored here: they go in the .env file.
+# A connector that is enabled but missing its credentials shows "needs setup" in the interface and its tools
+# are not offered to the agent. Every change a connector can make still needs the user's approval (R1/R2).
+connectors:
+  files:
+    enabled: true
+    # The ONLY folders the Files tools may touch (environment variables are expanded).
+    folders:
+      - '%USERPROFILE%\Documents'
+      - '%USERPROFILE%\Desktop'
+      - '%USERPROFILE%\Downloads'
+    max_read_kb: 200
+  shell:
+    enabled: true            # PowerShell: each command needs approval and passes a deny-list
+  web:
+    enabled: true            # read public web pages and search
+  directory:
+    enabled: true            # opens the official self-service password reset page (the agent never resets it itself)
+    sspr_url: https://aka.ms/sspr
+  microsoft365:
+    enabled: true            # needs M365_CLIENT_ID in .env (see "Setup" in the interface)
+    scopes: [Mail.ReadWrite, Mail.Send, Calendars.ReadWrite]
+  intune:
+    enabled: false           # needs the same Entra app plus admin-consented Intune permissions
+    scopes: [DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.PrivilegedOperations.All]
+  defender:
+    enabled: false
+    scopes: [SecurityAlert.Read.All]
+  servicenow:
+    enabled: false           # needs SERVICENOW_INSTANCE, SERVICENOW_USER, SERVICENOW_PASSWORD in .env
+
+# Live view: the interface shows a docked panel with screenshots of what the agent just did (a browser opening, a
+# folder, a file written ...). Screenshots stay on this computer (data/live) and are never sent to the model.
+live_view:
+  enabled: true
+
+# Autopilot: the general agent that chains tools across all connectors (plan, act, check, repeat).
+autopilot:
+  max_steps: 8               # model decisions per request
+  history_chars: 700         # how much of each earlier tool result the model is shown
+
+# ---- RAG (Retrieval-Augmented Generation) subsystem -------------------------
+# Run scripts/init_rag.py once to create the index from kb/*.md
+rag:
+  # Hybrid retrieval settings (§5 / §13 of the RAG spec)
+  top_k_candidates: 50          # BM25 + dense candidates before rerank
+  top_k_final: 6                # results returned to the agent
+  rrf_k: 60                     # RRF fusion constant
+  freshness_decay_days: 180     # exponential decay half-life for freshness score
+  max_context_tokens: 2000      # token budget for context block sent to LLM
+  sufficiency_threshold: 0.25   # relevance (0-1, share of query terms covered) below which retrieval is "irrelevant"; >=0.6 is "sufficient"
+  max_fallback_retries: 2       # corrective-RAG retry attempts (§5.5)
+
+  # Embedding model (optional – leave default for CPU-only setups)
+  # Requires: pip install sentence-transformers
+  # Set to null to disable dense search (BM25-only mode)
+  embedding_model: "all-MiniLM-L6-v2"   # used only when embedding_provider is "local"
+  # Vector search: "nvidia" = NVIDIA hosted embeddings (same NVIDIA_API_KEY as the chat model, nothing to install),
+  # "local" = sentence-transformers on this PC, "none" = keyword search only.
+  embedding_provider: nvidia
+  nvidia_embedding_model: "nvidia/nemotron-3-embed-1b"
+  vendor_trust: 0.8                     # imported Microsoft Learn articles rank a little below the company KB
+  # When the knowledge base has nothing relevant, answer from the model's general knowledge (clearly labelled)
+  general_knowledge_fallback: true
+
+  # Ingestion settings (§3)
+  chunk_max_words: 600          # split long sections at this word count
+  chunk_min_tokens: 30          # drop chunks shorter than this
+  pii_masking: true             # mask emails, phone numbers, IPs on ingest
+
+  # Freshness / lifecycle (§8)
+  # doc_type -> review cycle in days (after which freshness score degrades)
+  review_cycles:
+    runbook: 180
+    kb: 180
+    policy: 365
+    ticket: 90
+    vendor: 365
+    error_code: 90
+
+  # Trust order (§5.3) – higher is more trusted for ranking boosts
+  doc_type_trust:
+    error_code: 1.0
+    runbook: 0.95
+    kb: 0.9
+    policy: 0.85
+    ticket: 0.7
+    faq: 0.65
+    vendor: 0.6
+
+  # ACL groups that have access to restricted KB content (§7)
+  # Leave empty ([]) to allow all content to all users (single-tenant prototype)
+  default_user_groups: []
+
+  # Knowledge gap queue – notify when gap count exceeds this
+  gap_alert_threshold: 10
+
+  # Learning loop: auto-draft KB after this many similar resolved tickets (§11)
+  draft_kb_min_similar_tickets: 3

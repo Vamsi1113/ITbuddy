@@ -12,7 +12,7 @@ def new_task_id() -> str:
 
 
 def _drive(graph, payload, task_id: str, on_status: Callable[[dict], None] | None) -> dict:
-    config = {"configurable": {"thread_id": task_id}}
+    config = {"configurable": {"thread_id": task_id}, "recursion_limit": 120}
     for mode, chunk in graph.stream(payload, config, stream_mode=["custom", "updates"]):
         if mode == "custom" and on_status:
             on_status(chunk)
@@ -23,9 +23,14 @@ def _drive(graph, payload, task_id: str, on_status: Callable[[dict], None] | Non
     return {"status": "done", "task_id": task_id, "state": snapshot.values}
 
 
-def start(graph, request: str, on_status=None, task_id: str | None = None) -> dict:
+def start(graph, request: str, on_status=None, task_id: str | None = None, mode: str | None = None,
+          history: list | None = None) -> dict:
+    """mode="autopilot" sends the request to the general agent instead of letting the router choose.
+    history: the earlier turns of this chat ([{"role": "user"|"assistant", "text"}]), so follow-ups are understood."""
     task_id = task_id or new_task_id()
-    return _drive(graph, {"task_id": task_id, "request": request}, task_id, on_status)
+    payload = {"task_id": task_id, "request": request, **({"mode": mode} if mode else {}),
+               **({"history": list(history)} if history else {})}
+    return _drive(graph, payload, task_id, on_status)
 
 
 def resume(graph, task_id: str, approved: bool, on_status=None) -> dict:
