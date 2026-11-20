@@ -211,6 +211,21 @@ Intune, Defender ...), each connector with its status (ready / needs setup / swi
   company's own rules or systems are never guessed: Tobi offers a ticket instead. Turn it off with
   `rag.general_knowledge_fallback: false`.
 
+## Hands-on computer tasks
+
+Tobi does things for you instead of only explaining them. Each change is approved first (Level 1), the live view shows
+the steps, and read-only mode blocks them all.
+
+- **Record the screen / take a screenshot**: "record my screen for 5 seconds and save it as demo" saves
+  `demo.mp4` in Videos (H.264, no sound, up to 30 s, never overwrites). Screenshots go to Pictures. Tobi uses its own
+  bundled recorder (`imageio-ffmpeg`), so it does not depend on Snipping Tool's mouse-driven toolbar; if you ask it to
+  open an app first it opens it, then records, and says so. Files stay on your PC and are never sent to the model.
+- **Operate an app window**: `list_controls` (real button names), `click_control`, `type_text`, `press_keys`
+  (shortcuts such as `ctrl+s` or `win+shift+r`) and `wait_seconds`. Only windows on `desktop.allowed_windows` in
+  config.yaml (Notepad, Save as, Calculator, Snipping Tool, Paint by default) can be operated: add more there.
+  Shortcuts that lock the PC, close windows, open Run or system menus or end tasks are refused.
+  One approval for an app window covers the rest of that task in that window; a recording always asks again.
+
 ## Desktop pet and chat window
 
 `start_desktop.bat` (or `python run_desktop.py`, or the Tobi icon) starts Tobi as a small 3D character (the logo, built with three.js: it blinks, follows the mouse, talks while the agent works and shows a red bulb for new answers) at the

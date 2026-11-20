@@ -152,12 +152,19 @@ desktop:
     teams web: https://teams.microsoft.com
     sharepoint: https://www.office.com/launch/sharepoint
   # Window titles (regex, case-insensitive) the agent may interact with.
+  # Windows Tobi may look into and operate (list_controls, click_control, type_text, press_keys).
   allowed_windows:
     - "notepad"
     - "save as"
     - "calculator"
+    - "snipping tool"
+    - "paint"
   # Only used if pasting fails and the text has to be typed key by key.
   type_delay_seconds: 0.03
+
+automation:
+  max_record_seconds: 30        # longest screen recording Tobi will make
+  record_fps: 15
 
 browser:
   # Use the Edge already installed on Windows, so no Chromium download is needed.

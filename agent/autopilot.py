@@ -27,8 +27,20 @@ from tools.registry import R0, TOOLS, catalogue_text, validate_args
 
 # Tools that add noise for a general agent (maintenance of the knowledge index, UI automation with fixed windows).
 _EXCLUDED = {"report_kb_gap", "submit_kb_feedback", "draft_kb_article", "kb_index_stats", "get_kb_document",
-             "match_runbook", "search_knowledge_base_rag", "find_similar_tickets", "click_control", "type_text",
-             "run_browser_task"}
+             "match_runbook", "search_knowledge_base_rag", "find_similar_tickets", "run_browser_task"}
+
+# Tools that operate an app window. After the user approves one for a window, the rest of the SAME task may use
+# these on that window without asking for every click (each action is still audited and policy-checked).
+UI_TOOLS = {"press_keys", "click_control", "type_text"}
+
+
+def _window_key(tool: str, args: dict) -> str:
+    return str(args.get("window") or args.get("name") or "").strip().lower()
+
+
+def _ui_granted(granted: list, tool: str, args: dict) -> bool:
+    key = _window_key(tool, args)
+    return tool in UI_TOOLS and bool(key) and any(g in key or key in g for g in granted)
 
 
 def _emit(text: str, tool: str | None = None, image: str | None = None) -> None:
@@ -138,6 +150,9 @@ def think_node(state: dict) -> dict:
             text += "\n\n**What I did:**\n" + "\n".join(f"- {a}" for a in actions)
         return {"auto_next": "final", "outcome": "done" if actions else "no_action",
                 "proposal": {"diagnosis": text, "fix": None}}
+    if d["risk"] != R0 and _ui_granted(state.get("auto_ui_windows") or [], d["tool"], d["args"]):
+        _emit(f"Continuing in the window you already approved: {describe(d['tool'], d['args'])[0]}", d["tool"])
+        return {"auto_pending": d, "auto_next": "run", "auto_approved": True}
     return {"auto_pending": d, "auto_next": "run" if d["risk"] == R0 else "approve"}
 
 
@@ -168,6 +183,10 @@ def describe(tool: str, args: dict) -> tuple[str, str]:
     elif tool == "write_text_file":
         preview = args["content"][:600] + ("..." if len(args["content"]) > 600 else "")
         body = f"**File:** `{args['path']}` ({args.get('mode', 'create')})\n\n```\n{preview}\n```\n"
+    elif tool in UI_TOOLS or tool == "open_application":
+        body = ("\n".join(f"- {k}: {v}" for k, v in args.items()) + "\n\n"
+                "If you approve, Tobi can keep working in this window for the rest of this task (clicks, keys, typing) "
+                "without asking again for each step. You can see every step in the live view.\n")
     elif tool == "calendar_create_event":
         body = (f"**{args['subject']}**  \n{args['start']} to {args['end']}" +
                 (f"  \nInvites: {args['attendee']}" if args.get("attendee") else "") + "\n")
@@ -188,7 +207,12 @@ def approval_node(state: dict) -> dict:
     audit.log_event(state["task_id"], "approval", agent="autopilot", tool=p["tool"], args=p["args"],
                     risk_level=p["risk"], detail="approved" if approved else "rejected")
     if approved:
-        return {"auto_approved": True}
+        out = {"auto_approved": True}
+        if p["tool"] in UI_TOOLS or p["tool"] == "open_application":      # one approval covers this window for the task
+            key = _window_key(p["tool"], p["args"])
+            if key:
+                out["auto_ui_windows"] = list(state.get("auto_ui_windows") or []) + [key]
+        return out
     history = list(state.get("auto_history") or [])
     history.append({"note": f"The user REJECTED {p['tool']}({json.dumps(p['args'], default=str)[:150]}). "
                             "Do not try the same action again; offer an alternative or give the final answer."})

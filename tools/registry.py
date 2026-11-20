@@ -112,8 +112,8 @@ def catalogue_text(specs: list[ToolSpec]) -> str:
 
 
 # Importing the modules registers their tools. Keep this at the bottom.
-from tools import (account, browser, desktop, devices, knowledge, logs, network, performance,  # noqa: E402,F401
-                   printing, security, settings, software, storage, tickets)
+from tools import (account, automation, browser, desktop, devices, knowledge, logs, network,  # noqa: E402,F401
+                   performance, printing, security, settings, software, storage, tickets)
 
 # RAG tools – import after base tools so they can override/extend the howto domain.
 # Safe to import even if optional RAG dependencies are absent (graceful degradation).

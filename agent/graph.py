@@ -51,6 +51,7 @@ class State(TypedDict, total=False):
     auto_approved: bool
     auto_steps: int
     auto_actions: list     # changes Autopilot made, for the report
+    auto_ui_windows: list  # app windows the user already approved for hands-on work in this task
 
 
 def _emit(agent: str | None, text: str, tool: str | None = None, image: str | None = None) -> None:

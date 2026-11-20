@@ -142,7 +142,7 @@ def check_args(tool: str, args: dict) -> None:
         from tools.software import find_installable  # local import avoids a cycle
         if find_installable(args.get("package", "")) is None:
             raise PolicyError(f"'{args.get('package')}' is not on the installable software list")
-    elif tool in ("click_control", "type_text"):
+    elif tool in ("click_control", "type_text", "press_keys", "list_controls"):
         if not _window_allowed(args.get("window", "")):
             raise PolicyError(f"Window '{args.get('window')}' is not on the allowed window list")
     elif tool == "run_browser_task":
@@ -211,7 +211,8 @@ class ToolRunner:
             raise
 
         self.calls_made += 1
-        timeout = float(cfg("limits", "tool_timeout_seconds", default=30))
+        from tools.automation import TIMEOUTS      # a screen recording needs longer than the usual 30 s
+        timeout = max(float(cfg("limits", "tool_timeout_seconds", default=30)), TIMEOUTS.get(tool, 0))
         try:
             future = _pool.submit(spec.func, **args)
             result = future.result(timeout=timeout)

@@ -34,6 +34,14 @@ _AUTOPILOT = re.compile(
     r"files?|documents?|powershell|servicenow|incidents?|intune|web ?page|online)(?!\w)", re.IGNORECASE)
 
 
+_SCREEN_TASK = re.compile(
+    r"(?<!\w)(record(?:ing)?(?!\w).{0,30}(?<!\w)(?:screen|desktop|display)(?!\w)|"
+    r"screen\s*record(?:ing)?|take\s+(?:a\s+|me\s+a\s+)?screen\s*shot|screen\s*shot\s+(?:of|my)|capture\s+(?:my\s+|the\s+)?screen)",
+    re.IGNORECASE)
+_HOW_ANYWHERE = re.compile(r"(?<!\w)how\s+(?:do|can|could|to|should|would)(?!\w)|(?<!\w)(?:explain|tell me about|what is)(?!\w)",
+                           re.IGNORECASE)
+
+
 def fast_route(request: str) -> dict | None:
     """Obvious requests are routed in Python, so a small model cannot send "open YouTube" to the knowledge base."""
     if COMPUTER_USE.quick_pick(request):
@@ -46,6 +54,8 @@ def fast_route(request: str) -> dict | None:
         return {"agent": "howto", "question": ""}
     if printing.is_print_request(request):
         return {"agent": "devices", "question": ""}
+    if _SCREEN_TASK.search(request) and not _HOW_ANYWHERE.search(request):
+        return {"agent": "autopilot", "question": ""}          # recordings and screenshots: the general agent's tools
     return None
 
 

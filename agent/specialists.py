@@ -640,7 +640,8 @@ class ComputerUse:
     _LOCAL = re.compile(r"(?<!\w)(in|on)\s+my\s+(system|pc|laptop|computer|machine)(?!\w)|(?<!\w)installed(?!\w)", re.IGNORECASE)
     _OPEN_IT = re.compile(r"(?<!\w)(open|launch|start|run)\s+(it|that|this|them)(?!\w)", re.IGNORECASE)
     _INSTALL = re.compile(r"(?<!\w)install(?!\w)", re.IGNORECASE)
-    _NOT_SIMPLE = re.compile(r"(?<!\w)(write|type|save|summary|download|report|note|portal|health|and then)(?!\w)", re.IGNORECASE)
+    _NOT_SIMPLE = re.compile(r"(?<!\w)(write|type|save|summary|download|report|note|portal|health|and then|record|recording|"
+                             r"screenshot|capture|press|click|seconds?|minutes?|start a)(?!\w)", re.IGNORECASE)
     _DOMAIN = re.compile(r"(?<![\w@.-])((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#][^\s]*)?)", re.IGNORECASE)
 
     _FILE_EXT = {"exe", "bat", "cmd", "dll", "msi", "ps1", "vbs", "js", "py", "txt", "doc", "docx", "xls", "xlsx",
