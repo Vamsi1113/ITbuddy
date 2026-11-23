@@ -24,7 +24,7 @@ SAMPLE_ARGS = {"host": "www.microsoft.com", "port": 443, "setting": "developer_m
                "package": "7-Zip", "browser": "default", "command": "Get-Date", "purpose": "test",
                "content": "x", "mode": "create", "to": "a@b.com", "subject": "s", "body": "b", "start": "2026-01-01T10:00",
                "end": "2026-01-01T11:00", "attendee": "", "short_description": "t", "description": "d",
-               "urgency": "3", "text": "x", "window": "Calculator", "seconds": 1}
+               "urgency": "3", "text": "x", "window": "Calculator", "seconds": 1, "target": "ODC B printer"}
 
 
 @pytest.mark.parametrize("name", sorted(n for n, t in TOOLS.items() if t.risk == R0))

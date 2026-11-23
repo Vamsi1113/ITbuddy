@@ -109,6 +109,12 @@ DOMAINS: dict[str, Domain] = {d.name: d for d in (
            "seat if they know). If they tell you, choose the fix set_my_location with odc, floor and seat.\n"
            "- If computer_type is avd, say this is a virtual desktop and use avd_note; do not claim the printers or "
            "Wi-Fi of the user's real PC are visible.\n"
+           "- Another ODC's printer (access is request_required): say plainly that their ODC's printers are for people "
+           "of that ODC and that access needs approval (cite the SOP); give the how_to_request steps in one line each; "
+           "show the email text (to, subject, body) in a short block so they can copy it; offer the fix "
+           "request_printer_access with target_odc and, if they gave one, the reason; then list their OWN ODC's printers "
+           "(use_instead) and other_devices to continue with. If access is not_possible say why and do not offer a request.\n"
+           "- If target_odc is unknown ask which ODC they mean; if the user's own ODC is unknown ask that first.\n"
            "- If the user asks to PRINT a file and a printer is ready, choose the fix print_file with the file and the "
            "best ready printer. If none is ready, explain what to do instead; never print on a printer that is not ready.\n"
            "- Cite the SOP from TOOL OUTPUT (the sop field or get_workplace_sop source) when you state a rule.",
@@ -160,6 +166,9 @@ def route_howto(request: str) -> list[dict]:
     return [{"tool": "search_knowledge_base", "args": {"query": q}}]
 
 
+_WP_OTHER_PLACE = re.compile(
+    r"(?<!\w)(other|another|different|side|neighbou?ring|nearby|next|that|their)\s+(?:\w+\s+){0,2}(?:odc|block|office|floor|building|site|location)s?(?!\w)"
+    r"|(?<!\w)odc\s*['\"\u2018\u2019]?[\w-]+", re.IGNORECASE)
 _WP_NETWORK = re.compile(r"(?<!\w)(wi-?fi|wireless|ssid|vpn|network|internet|lan|connect(?:ed)? to)(?!\w)", re.IGNORECASE)
 _WP_PRINT = re.compile(r"(?<!\w)(print|printer|printers|printing)(?!\w)", re.IGNORECASE)
 
@@ -179,6 +188,11 @@ def route_workplace(request: str) -> list[dict]:
     """Which read-only checks answer a workplace question. Deterministic: no model call."""
     q = request.strip()[:300]
     steps = []
+    from tools import org_rules
+    if _WP_PRINT.search(q) and (_WP_OTHER_PLACE.search(q) or org_rules.resolve_odc(q)):
+        # a printer somewhere else: what the rules say, how to ask for access, and what to use meanwhile
+        return [{"tool": "get_printer_access_rules", "args": {"target": q}},
+                {"tool": "get_workplace_sop", "args": {"topic": "printer access for other ODC request approval"}}]
     if _WP_PRINT.search(q):
         from tools import printing
         name = _strip_lead_words(printing.extract_file_name(q))
@@ -402,6 +416,53 @@ def general_answer(request: str, history: list | None = None) -> dict:
     return proposal
 
 
+_ACCESS_ACTION = re.compile(r"(?<!\w)(raise|submit|create|file|make|apply|send|log|open)(?!\w).{0,40}?(?<!\w)(request|ticket|access)(?!\w)",
+                            re.IGNORECASE)
+_STATUS_WORD = {"ready": "ready", "add_first": "add it first", "offline": "offline"}
+
+
+def wants_access_action(request: str) -> bool:
+    """The user asks Tobi to DO the access request (raise it, apply), not just to explain how."""
+    return bool(_ACCESS_ACTION.search(request or ""))
+
+
+def access_proposal(out: dict) -> dict:
+    """The answer to "can I use another ODC's printer?", written from the organisation's rules (no model needed):
+    the rule, how to ask for access (request and email), and what to use meanwhile. Short, in plain words."""
+    sop = out.get("sop") or "the printing SOP"
+    name = out.get("target_name") or ""
+    if out.get("odc") == "unknown":
+        known = ", ".join(out.get("known_odcs") or [])
+        want = f" You want the printers of {name}." if name else ""
+        return {"diagnosis": f"I could not tell which ODC you sit in.{want} Tell me your ODC (for example: {known}) and, if you know "
+                             "them, your floor and seat, and I will give you the exact steps.", "fix": None, "reason": ""}
+    if out.get("target_odc") == "unknown":
+        known = ", ".join(out.get("known_odcs") or [])
+        return {"diagnosis": f"Which ODC's printer do you want to use? The ODCs I know are: {known}.", "fix": None, "reason": ""}
+    if out.get("access") == "same_odc":
+        return {"diagnosis": f"{name} is your own ODC, so its printers are already yours. Ask me \"which printer should I use?\" "
+                             "and I will show which ones are ready on this computer.", "fix": None, "reason": ""}
+    parts = []
+    if out.get("access") == "not_possible":
+        parts.append(f"**{name} printers**\n{out.get('why', '')} ({sop})")
+    else:
+        parts.append(f"**{name} printers**\nThey are for people of that ODC. Using them needs approval ({sop}).")
+        how = out.get("how_to_request") or []
+        if how:
+            parts.append("**How to get access**\n" + "\n".join(f"{i}. {h}" for i, h in enumerate(how[:2], 1)))
+        mail = out.get("email")
+        if mail:
+            parts.append(f"**Or send an email** to {mail['to']}\n> **Subject:** {mail['subject']}\n> {mail['body']}")
+        parts.append("I can raise the request for you: tell me the reason (for example the project) and say \"raise it\".")
+    use = out.get("use_instead") or []
+    devices = out.get("other_devices") or []
+    if use or devices:
+        lines = [f"- {u['printer']}: {u.get('where', '')} ({_STATUS_WORD.get(u.get('status'), u.get('status'))})" for u in use]
+        lines += [f"- {d}" for d in devices]
+        parts.append("**Use these meanwhile (your own ODC)**\n" + "\n".join(lines))
+    return {"diagnosis": "\n\n".join(parts), "fix": None, "reason": "", "access_rules": True}
+
+
 def chat_reply(request: str, history: list | None = None) -> str:
     """A natural reply for greetings, thanks, small talk and vague messages (no checks on the computer needed)."""
     def validate(d: dict) -> dict:
@@ -567,6 +628,12 @@ def print_proposal(result: dict) -> dict:
         if not fix.get("assist"):
             fixable.append(f["id"])
 
+    # Steps that only open a Windows page for the user to do it themselves are advice, not an action to approve:
+    # the explanation already says what to do, and the user can ask for the page to be opened.
+    opens_page_only = bool(steps) and not fixable
+    if opens_page_only:
+        steps = []
+
     # 2. nothing wrong on the computer and a real printer exists: offer a test page to confirm
     real = [p for p in state["printers"] if not printing.is_virtual(p)]
     if not problems and real:
@@ -599,6 +666,8 @@ def print_proposal(result: dict) -> dict:
     needs_it = [f for f in problems if f["needs_it"]]
     if needs_it:
         parts.append("**Needs IT**\n" + "\n".join(f"- {f['what']}" for f in needs_it))
+    if opens_page_only:
+        parts.append("Say \"open the printer settings\" and I will open that page for you.")
 
     proposal = {"diagnosis": "\n\n".join(parts), "reason": "", "fix": None, "file_name": file_name,
                 "before_ids": [f["id"] for f in problems], "fixable_ids": fixable}

@@ -168,12 +168,24 @@ desktop:
 organisation:
   odc_override: ""              # force one ODC for this PC (kiosks, testing); empty = detect
   seats_file: "organisation/seats.csv"   # computer (or remote PC) name -> ODC, floor, seat
+  # Using ANOTHER ODC's printers: how to ask, who approves. Each ODC can override it with outside_printer_access
+  # (mode: request | not_possible). SAMPLE values.
+  printer_access:
+    default: request
+    request_portal: "ServiceNow > Request > Printer access (other ODC)"
+    request_email: "it-printing@example.com"
+    approvers: "your reporting manager and the IT owner of that ODC"
+    turnaround: "2 working days"
+    sop: "SOP-IT-PRN-006 v1.0"
   # Each ODC: how to recognise it (subnets, floors, computer-name prefixes, security groups) and ITS rules for
   # printers, Wi-Fi and VPN. In a virtual desktop (AVD) the user's own PC is the one that sits in the office, so
   # when Windows does not tell Tobi where that PC is, Tobi asks the user once and remembers the answer.
   odcs:
     HYD-ODC-2:
       name: "Hyderabad ODC 2"
+      aliases: ["hyderabad", "odc a", "block a", "hyd odc"]
+      devices: ["HYD2-F3-Scan-01 (scanner, 3rd floor)", "HYD2-F5-Scan-02 (scanner, 5th floor)"]
+      outside_printer_access: { mode: request, email: "it-printing-hyd@example.com" }
       subnets: ["10.42.16.0/20"]
       floors: { "3": ["10.42.17.0/24"], "5": ["10.42.19.0/24"] }
       hostname_prefixes: ["HYD2-"]
@@ -198,6 +210,10 @@ organisation:
         when_needed: "Not needed in the office. Always connect the VPN when working from home or outside the ODC."
     PUNE-ODC-1:
       name: "Pune ODC 1"
+      aliases: ["pune", "odc b", "block b", "side block", "side blocks"]
+      devices: ["PUN1-G-Scan-01 (scanner, security desk)"]
+      # outside_printer_access: { mode: not_possible, note: "Client-dedicated ODC: no outside access to its printers." }
+      outside_printer_access: { mode: request, email: "it-printing-pune@example.com" }
       subnets: ["10.51.0.0/20"]
       floors: { "0": ["10.51.1.0/24"] }
       hostname_prefixes: ["PUN1-"]

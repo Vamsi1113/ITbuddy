@@ -86,7 +86,8 @@ def _sop_label(citation: str) -> str:
 
 
 def _context_lines(out: dict) -> list[str]:
-    ctx = out.get("get_my_print_options") or out.get("get_my_network_options") or out.get("get_my_org_context")
+    ctx = (out.get("get_my_print_options") or out.get("get_my_network_options") or out.get("get_printer_access_rules")
+           or out.get("get_my_org_context"))
     if not ctx:
         return []
     lines = []
@@ -111,8 +112,33 @@ def _context_lines(out: dict) -> list[str]:
     return lines
 
 
+def _access_lines(out: dict) -> list[str]:
+    acc = out.get("get_printer_access_rules")
+    if not acc:
+        return []
+    name = acc.get("target_name") or acc.get("target_odc")
+    sop = f" ({acc['sop']})" if acc.get("sop") else ""
+    if acc.get("odc") == "unknown":
+        lines = [_line("Rule", f"I need your own ODC to check access to {name}" if acc.get("target_name") else
+                       "I need your own ODC, and the ODC whose printer you mean")]
+    elif acc.get("access") == "request_required":
+        lines = [_line("Rule", f"{name} printers are for that ODC: other ODCs need approval{sop}")]
+        if acc.get("how_to_request"):
+            lines.append(_line("Rule", acc["how_to_request"][1].replace("It is approved by", "approved by")))
+    elif acc.get("access") == "not_possible":
+        lines = [_line("Rule", f"{name} does not allow other ODCs to use its printers{sop}")]
+    elif acc.get("access") == "same_odc":
+        lines = [_line("Rule", f"{name} is your own ODC")]
+    else:
+        lines = [_line("Rule", "no other ODC was named, so nothing to check")]
+    use = acc.get("use_instead") or []
+    if use:
+        lines.append(_line("This PC", "your ODC's printers: " + ", ".join(u["printer"] for u in use[:3])))
+    return lines
+
+
 def _rule_lines(out: dict) -> list[str]:
-    lines = []
+    lines = _access_lines(out)
     opts = out.get("get_my_print_options")
     if opts and opts.get("printers"):
         rows = opts["printers"]
@@ -239,17 +265,16 @@ def build(state: dict) -> list[str]:
     lines += _source_lines(out, proposal)
     if not any(l.startswith(("**Rule", "**Source")) for l in lines):
         lines += _checked_line(out)                     # measurements matter when no rule or source explains the answer
-    lines += _result_line(state)
-    # one "This PC" line (kind of computer + printer state), the rest in order
+    result = _result_line(state)
+    # one "This PC" line (kind of computer + printer state), placed right after the "You" lines
     pc = [l.split(":** ", 1)[1] for l in lines if l.startswith("**This PC:**")]
     rest = [l for l in lines if not l.startswith("**This PC:**")]
     if pc:
-        at = next((i for i, l in enumerate(rest) if l.startswith("**Rule")), len(rest))
-        rest.insert(1 if rest and rest[0].startswith(("**You", "**You said")) and at > 1 else min(at, len(rest)),
-                    _line("This PC", "; ".join(pc)))
+        after_you = max((i + 1 for i, l in enumerate(rest) if l.startswith("**You")), default=0)
+        rest.insert(after_you, _line("This PC", "; ".join(pc)))
     seen, final = set(), []
     for l in rest:
         if l not in seen:
             seen.add(l)
             final.append(l)
-    return final[:MAX_LINES]
+    return final[:MAX_LINES - len(result)] + result              # the result line is always kept

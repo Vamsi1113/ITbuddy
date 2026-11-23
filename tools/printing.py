@@ -171,6 +171,18 @@ def is_print_request(text: str) -> bool:
     return bool(_PRINT_REQUEST.search(text or ""))
 
 
+_PRINT_PROBLEM = re.compile(
+    r"(?<!\w)(not|cannot|unable|fails?|failed|failing|error|errors|offline|stuck|jam|jams|jammed|toner|ink|cartridge|spooler|"
+    r"blank|slow|queue|broken|issue|issues|problem|problems|wrong|stopped|missing|disappeared|garbled|faded|streaks?|smudged)(?!\w)"
+    r"|n[\u2019']t(?!\w)", re.IGNORECASE)
+
+
+def is_print_problem(text: str) -> bool:
+    """Something is WRONG with printing (offline, stuck, will not print ...). Mentioning a printer is not a problem:
+    "which printer should I use" or "I want to use another ODC's printer" is a question about rules and access."""
+    return is_print_request(text) and bool(_PRINT_PROBLEM.search(text or ""))
+
+
 def extract_file_name(text: str) -> str:
     m = _FILE_NAME.search(text or "")
     return (m.group(1) or m.group(2)).strip() if m else ""

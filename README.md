@@ -249,6 +249,18 @@ Tobi works out where the user is, then applies THAT ODC's rules (`organisation` 
 - Every rule is cited from the SOP (id, version, section). The printers, networks and seats in config.yaml and
   `organisation/` are **samples**: replace them with your organisation's.
 
+### Printer questions are answered by intent, not by the word "printer"
+
+- A problem ("printer offline", "I cannot print", "stuck in the queue", "toner is low") goes to the printing
+  troubleshooter. A question or request that only mentions a printer goes to the rules: Tobi never opens Settings or asks
+  for approval just because it saw the word "printer"; advice stays advice ("say 'open the printer settings' and I will").
+- **Using another ODC's printer** ("I want to use ODC B's printer"): Tobi finds which ODC you mean, checks that ODC's
+  policy (`organisation.printer_access` and `outside_printer_access` per ODC, plus SOP-IT-PRN-006), and answers from the
+  rules: that its printers need approval (or are not available to other ODCs at all), how to ask (the request portal and
+  approvers), a ready-to-send email to that ODC's IT, and your own ODC's printers and devices to use meanwhile. Say
+  "raise it" and give a reason and Tobi raises the access request (a ticket with your ODC, floor, seat and reason) after
+  you approve it.
+
 ## Save a document as a PDF (virtual printer)
 
 "Convert my itbuddy test note to a PDF using my printer" (or "save my report as PDF on the desktop") makes Tobi do what

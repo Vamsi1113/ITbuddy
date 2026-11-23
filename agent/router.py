@@ -42,6 +42,26 @@ _WORKPLACE = re.compile(
     r"(?:am\s+i|is\s+this)\s+(?:on|in)\s+(?:an?\s+)?(?:avd|virtual\s+desktop|physical)|"
     r"(?:print|send)\s+(?:this|that|the|my|a)?\s*[\w\-. ()]{1,60}\.(?:pdf|docx?|xlsx?|pptx?|txt|png|jpe?g)|"
     r"printers?\s+(?:available|near|on\s+my\s+floor|in\s+my))(?!\w)", re.IGNORECASE)
+_ODC_MENTION = re.compile(r"(?<!\w)odc\s*['\"\u2018\u2019]?[\w-]+", re.IGNORECASE)
+_OTHER_PLACE = re.compile(r"(?<!\w)(other|another|different|side|neighbou?ring|nearby|next|that|their)\s+(?:\w+\s+){0,2}"
+                          r"(?:odc|block|office|floor|building|site|location|centre|center)s?(?!\w)", re.IGNORECASE)
+_ACCESS_REQUEST = re.compile(
+    r"(?<!\w)(raise|submit|create|file|make|apply\s+for|send|log)\s+(?:it|a|the|an|my)?\s*(?:printer\s+)?(?:access\s+)?(?:request|ticket)"
+    r"(?:\s+(?:for|to)\s+[\w\s'\"-]{0,40}printers?)?|(?<!\w)(?:raise|submit)\s+it(?!\w)", re.IGNORECASE)
+_FLOOR = re.compile(r"(?<!\w)(?:\d+(?:st|nd|rd|th)?|ground|first|second|third|fourth|fifth|top)\s+floor|floor\s+\d+", re.IGNORECASE)
+_PRINT_WORD = re.compile(r"(?<!\w)(print\w*|scanners?|copiers?)(?!\w)", re.IGNORECASE)
+
+
+def _printer_in_another_place(request: str) -> bool:
+    """"use ODC B's printer", "the printer in the side block": access to a printer somewhere else, a rules question."""
+    if not _PRINT_WORD.search(request):
+        return False
+    if _ODC_MENTION.search(request) or _OTHER_PLACE.search(request) or _FLOOR.search(request):
+        return True
+    from tools import org_rules                                  # "the hyderabad printers": an ODC named by its name
+    return bool(org_rules.resolve_odc(request))
+
+
 _SOP_QUESTION = re.compile(
     r"(?<!\w)(sops?|standard operating procedures?|(?:which|what) printers?\s+(?:can|may|am|should|do)|"
     r"am i allowed|are we allowed|allowed to|(?:rules?|polic(?:y|ies))\s+(?:for|on|about)|in my odc|my odc|"
@@ -65,12 +85,16 @@ def fast_route(request: str) -> dict | None:
         return {"agent": "autopilot", "question": ""}
     if _HOWTO_QUESTION.match(request):
         return {"agent": "howto", "question": ""}
+    if _printer_in_another_place(request) or _ACCESS_REQUEST.search(request):
+        return {"agent": "workplace", "question": ""}          # access to another ODC's printer: rules, request, email
     if _WORKPLACE.search(request) and not _HOW_ANYWHERE.search(request):
         return {"agent": "workplace", "question": ""}
     if _SOP_QUESTION.search(request):
         return {"agent": "howto", "question": ""}              # what the SOP says: before any troubleshooting
+    if printing.is_print_problem(request):
+        return {"agent": "devices", "question": ""}            # something is wrong with printing: troubleshoot
     if printing.is_print_request(request):
-        return {"agent": "devices", "question": ""}
+        return {"agent": "workplace", "question": ""}          # a printer is only mentioned: it is a rules / options question
     if _SCREEN_TASK.search(request) and not _HOW_ANYWHERE.search(request):
         return {"agent": "autopilot", "question": ""}          # recordings and screenshots: the general agent's tools
     return None

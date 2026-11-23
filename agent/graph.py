@@ -137,6 +137,8 @@ def route_node(state: State) -> dict:
         choice = router.route(request)
     except ModelError as e:
         return {**base, "agent": "none", "outcome": "error", "error": str(e)}
+    if choice["agent"] == "devices" and printing.is_print_request(request) and not printing.is_print_problem(request):
+        choice = {"agent": "workplace", "question": ""}         # nothing is broken: do not troubleshoot, answer from the rules
     audit.log_event(task_id, "route", agent=choice["agent"], detail=choice)
     if choice["agent"] == "none":
         # greetings, thanks, small talk, general or vague messages: a natural reply, not a list of features
@@ -168,7 +170,7 @@ def diagnose_node(state: State) -> dict:
             return _diagnose_computer_use(state)
         if agent == "it_request":
             return _service_desk(state)
-        if agent == "devices" and printing.is_print_request(state["request"]):
+        if agent == "devices" and printing.is_print_problem(state["request"]):
             return _diagnose_printing(state)
         return _diagnose(state, DOMAINS[agent])
     except (ModelError, PolicyError) as e:
@@ -189,6 +191,14 @@ def _diagnose(state: State, domain) -> dict:
         return {"plan": steps, "diagnostics": diagnostics, "tool_calls": runner.calls_made, "outcome": "error",
                 "error": "The checks failed: " + "; ".join(failed)}
     general = agent == "howto" and bool(cfg("rag", "general_knowledge_fallback", default=True))
+    access = diagnostics.get("get_printer_access_rules")
+    if agent == "workplace" and access and access.get("ok") and not specialists.wants_access_action(state["request"]):
+        # another ODC's printer: the answer comes straight from the organisation's rules, not from the model
+        proposal = specialists.access_proposal(access)
+        audit.log_event(state["task_id"], "proposal", agent=agent, tool=None,
+                        detail={"diagnosis": proposal["diagnosis"][:200]})
+        return {"plan": steps, "diagnostics": diagnostics, "proposal": proposal, "tool_calls": runner.calls_made,
+                "outcome": "no_action"}
     try:
         if general and not specialists.kb_found_something(diagnostics):
             proposal = None                       # nothing in the knowledge base: skip straight to general knowledge

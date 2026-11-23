@@ -155,6 +155,128 @@ def print_options(file_name: str = "") -> dict:
     return out
 
 
+# ------------------------------------------------------------------------------------------------ another ODC's printers
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def resolve_odc(text: str) -> str:
+    """The ODC a user's words point at ("ODC B", "the Pune ODC", "block B"): its id, or "" when none is named."""
+    q = _norm(text)
+    for odc, info in (cfg("organisation", "odcs", default={}) or {}).items():
+        names = {_norm(odc), _norm((info or {}).get("name", ""))} | {_norm(a) for a in (info or {}).get("aliases") or []}
+        for n in names - {""}:
+            if re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", q):
+                return odc
+    return ""
+
+
+def _access_policy(target: str) -> dict:
+    """What the organisation says about people from other ODCs using THIS ODC's printers."""
+    base = cfg("organisation", "printer_access", default={}) or {}
+    own = odc_info(target).get("outside_printer_access") or {}
+    return {"mode": own.get("mode") or base.get("default", "request"), "note": own.get("note", ""),
+            "email": own.get("email") or base.get("request_email", ""), "portal": base.get("request_portal", ""),
+            "approvers": base.get("approvers", ""), "turnaround": base.get("turnaround", ""), "sop": base.get("sop", "")}
+
+
+def _own_options(ctx_odc: str, options: dict) -> list[dict]:
+    keep = []
+    for r in options.get("printers", [])[:3]:
+        if r["status"] in ("ready", "add_first", "offline"):
+            keep.append({"printer": r["printer"], "where": r.get("location", ""), "status": r["status"],
+                         "colour": r.get("colour"), "accepts": r.get("accepts")})
+    return keep
+
+
+def printer_access_rules(target_text: str) -> dict:
+    """Can this user use a printer in ANOTHER ODC? What the rules say, how to ask for access, and what to use meanwhile."""
+    from tools import org_context
+    ctx = org_context.full_context()
+    loc = ctx["location"]
+    odcs = cfg("organisation", "odcs", default={}) or {}
+    target = resolve_odc(target_text)
+    out = {"ok": True, "odc": loc["odc"] or "unknown", "floor": loc["floor"] or "unknown", "seat": loc["seat"] or "unknown",
+           "located_by": loc["how"], "computer_type": ctx["environment"]["kind"], "target_odc": target or "unknown"}
+    if target:
+        out["target_name"] = (odcs.get(target) or {}).get("name", target)
+    if not loc["odc"]:
+        out["note"] = ("The user's own ODC is not known, so the access rules cannot be applied yet. Ask which ODC they "
+                       "sit in (then use set_my_location)" + (f"; they want the printers of {out['target_name']}." if target else "."))
+        out["known_odcs"] = sorted(odcs)
+        return out
+    if not target:
+        out["note"] = "The user did not say which ODC's printer they mean. Ask which one."
+        out["known_odcs"] = [k for k in sorted(odcs) if k != loc["odc"]]
+        return out
+    name = (odcs.get(target) or {}).get("name", target)
+    out["target_name"] = name
+    if target == loc["odc"]:
+        out["access"] = "same_odc"
+        out["note"] = f"{name} is the user's own ODC: its printers are the ones in get_my_print_options."
+        return out
+    policy = _access_policy(target)
+    out["sop"] = policy["sop"]
+    out["printers_there"] = [e.get("name") for e in odc_info(target).get("printers") or []][:4]
+    own = print_options("")
+    out["use_instead"] = _own_options(loc["odc"], own)
+    out["other_devices"] = (odc_info(loc["odc"]).get("devices") or [])[:4]
+    reason = "[your reason, for example the project or document]"
+    if policy["mode"] == "not_possible":
+        out["access"] = "not_possible"
+        out["why"] = policy["note"] or f"{name} does not allow people from other ODCs to use its printers."
+        return out
+    out["access"] = "request_required"
+    out["how_to_request"] = [f"Raise a request: {policy['portal']}" if policy["portal"] else "Raise a request with the IT Service Desk",
+                             f"It is approved by {policy['approvers']}" + (f"; usually {policy['turnaround']}" if policy["turnaround"] else ""),
+                             "Until it is approved, print on your own ODC's printers"]
+    if policy["email"]:
+        who = f"{loc['name'] or loc['odc']}" + (f", floor {loc['floor']}" if loc["floor"] else "") + (f", seat {loc['seat']}" if loc["seat"] else "")
+        out["email"] = {"to": policy["email"], "subject": f"Printer access request: {name}",
+                        "body": f"Hello, I sit in {who}. Please give me access to the printers in {name} "
+                                f"({', '.join(out['printers_there'][:2])}) because {reason}. Thank you."}
+    return out
+
+
+@tool("workplace", R0, "Whether the user may use a printer in ANOTHER ODC (office block), what the SOP says, how to ask for "
+      "access (request and email text), and which printers and devices of their own ODC to use meanwhile.",
+      params=(Param("target", "str", "the user's words naming the other ODC, for example 'ODC B'", max_len=300),))
+def get_printer_access_rules(target: str) -> dict:
+    from rag.retrieval import fit_output
+    return fit_output(printer_access_rules(target))
+
+
+@tool("workplace", R1, "Raise a request (ticket) for access to the printers of ANOTHER ODC, with the user's ODC, floor and "
+      "seat and the reason, so IT and the approvers get everything in one place.",
+      params=(Param("target_odc", "str", "the other ODC, for example ODC B", max_len=60),
+              Param("reason", "str", "why the user needs it, in the user's words", required=False, max_len=300)),
+      change_note="A ticket is created for IT and the approvers. Nothing on your computer is changed, and no access is "
+                  "given until it is approved.",
+      summary="Raise a request for access to the {target_odc} printers")
+def request_printer_access(target_odc: str, reason: str = "") -> dict:
+    from tools import org_context, tickets
+    target = resolve_odc(target_odc)
+    if not target:
+        return {"ok": False, "error": f"'{target_odc}' is not a known ODC",
+                "known_odcs": sorted(cfg("organisation", "odcs", default={}) or {})}
+    loc = org_context.detect_location()
+    if not loc["odc"]:
+        return {"ok": False, "error": "I do not know which ODC you sit in yet, so the request would be incomplete"}
+    if target == loc["odc"]:
+        return {"ok": False, "error": "That is your own ODC: you already have access to its printers"}
+    policy = _access_policy(target)
+    if policy["mode"] == "not_possible":
+        return {"ok": False, "error": policy["note"] or "That ODC does not allow people from other ODCs to use its printers"}
+    name = (cfg("organisation", "odcs", default={}) or {}).get(target, {}).get("name", target)
+    summary = (f"Printer access request: a user from {loc['name'] or loc['odc']} (floor {loc['floor'] or '?'}, seat "
+               f"{loc['seat'] or '?'}) needs to use the printers of {name}. Reason: {reason or 'not given'}. "
+               f"Policy: {policy['sop'] or 'printer access policy'}; approvers: {policy['approvers'] or 'IT'}.")
+    ticket = tickets.create_ticket(f"Printer access to {name}", summary, category="access_request", priority="P4",
+                                   work_notes=f"Raised by Tobi after the user asked to print in {name}. Own ODC: {loc['odc']}.")
+    return {"ok": True, "ticket": ticket.get("ref") or ticket.get("id"), "for": name, "approvers": policy["approvers"],
+            "note": "No access is given until it is approved"}
+
+
 # ------------------------------------------------------------------------------------------------ network
 def network_options() -> dict:
     from tools import org_context
