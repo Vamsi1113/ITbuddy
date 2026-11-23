@@ -159,6 +159,7 @@ desktop:
     - "calculator"
     - "snipping tool"
     - "paint"
+    - "save print output"
   # Only used if pasting fails and the text has to be typed key by key.
   type_delay_seconds: 0.03
 

@@ -776,10 +776,48 @@ class ComputerUse:
     def _whole_word(word: str, text: str) -> bool:
         return re.search(r"(?<![\w+])" + re.escape(word) + r"(?![\w+])", text, re.IGNORECASE) is not None
 
+    _PDF_WORD = re.compile(r"(?<!\w)pdf(?!\w)", re.IGNORECASE)
+    _PDF_VERB = re.compile(r"(?<!\w)(convert|save|export|print|turn|make|create|change|write)(?!\w)", re.IGNORECASE)
+    _PDF_WHAT = re.compile(
+        r"(?<!\w)(?:convert|save|export|print|turn|make|create|change|write)(?!\w)\s+(?:me\s+)?(?:a\s+(?:copy|pdf)\s+of\s+)?"
+        r"(?P<what>.+?)\s+(?:to|as|into|in)\s+(?:a\s+|an\s+|the\s+)?(?:\w+\s+)?pdf(?!\w)", re.IGNORECASE | re.DOTALL)
+    _PDF_OF = re.compile(r"(?<!\w)pdf\s+(?:copy\s+)?(?:of|from)\s+(?P<what>.+)$", re.IGNORECASE | re.DOTALL)
+    _PDF_HOW = re.compile(r"(?<!\w)(how\s+(?:do|can|could|to|should|would)|what\s+is|why|explain)(?!\w)", re.IGNORECASE)
+    _PDF_CUT = re.compile(r"(?<!\w)(by|using|with|via|through|on\s+my\s+printer|from\s+my\s+printer)(?!\w).*$", re.IGNORECASE | re.DOTALL)
+    _PDF_WHERE = re.compile(r"(?<!\w)(?:in|on|to|into|at|under)\s+(?:my\s+|the\s+)?(desktop|documents|downloads)(?!\w)", re.IGNORECASE)
+
+    def _pdf_pick(self, text: str) -> dict | None:
+        """"convert my itbuddy test note to a pdf" / "save my report as pdf on the desktop" -> save_as_pdf."""
+        if not self._PDF_WORD.search(text) or self._PDF_HOW.search(text):
+            return None
+        m = self._PDF_WHAT.search(text) or self._PDF_OF.search(text)
+        if not m:
+            return None
+        what = m.group("what")
+        folder = ""
+        where = self._PDF_WHERE.search(text)
+        if where:
+            folder = where.group(1).title()
+            what = self._PDF_WHERE.sub(" ", what)
+        what = self._PDF_CUT.sub("", what)
+        words = [w for w in re.split(r"\s+", what.strip(" .,!?'\"")) if w]
+        generic = {"my", "the", "a", "an", "this", "that", "file", "document", "documnet", "doc", "please", "pls", "called", "named"}
+        while words and words[0].lower() in generic:
+            words.pop(0)
+        while words and words[-1].lower() in {"file", "document", "documnet", "doc"}:
+            words.pop()
+        phrase = " ".join(words).strip()
+        if not phrase or len(phrase) > 120:
+            return None
+        return {"task": "save_as_pdf", "file": phrase, "folder": folder, "reason": ""}
+
     def quick_pick(self, request: str) -> dict | None:
         """Recognise "open <site/app>" and "install <catalogue program>" without a model call. None = not one of these."""
         text = request.strip()
         low = text.lower()
+        pdf = self._pdf_pick(text)
+        if pdf:
+            return pdf
         if re.search(r"(?<!\w)(uninstall|remove|delete)(?!\w)", low):
             return None
         if self._PASSWORD.search(low):
@@ -935,6 +973,45 @@ class ComputerUse:
             "steps": [{"tool": "open_website", "args": {"url": url, "browser": browser},
                        "label": f"Open {url} in {label}"}],
             "expected_file": None, "verify": "steps_ok",
+        }
+
+    def plan_save_as_pdf(self, choice: dict) -> dict:
+        """Save a document as a PDF with the virtual printer: finds the file, says what will happen, verifies the PDF."""
+        from tools import pdfprint
+        phrase = choice["file"]
+        found = pdfprint.find_documents(phrase, 4)
+        source = pdfprint.resolve_document(phrase)
+        say = lambda text: {"diagnosis": text, "fix": None, "reason": ""}      # noqa: E731
+        if source is None:
+            if found:
+                names = ", ".join(p.name for p in found)
+                return say(f"I found more than one document that could be '{phrase}': {names}. Tell me which one to save as a PDF.")
+            return say(f"I could not find a document called '{phrase}' in your Desktop, Documents or Downloads folder. "
+                       "Tell me its exact name, or put it in one of those folders.")
+        ext = source.suffix.lower()
+        if ext == ".pdf":
+            return say(f"{source.name} is already a PDF, so there is nothing to convert.")
+        if ext not in pdfprint.CONVERTIBLE:
+            return say(f"{ext} files cannot be saved as a PDF with the printer. Open the file in its own program and use "
+                       "Print > Microsoft Print to PDF there.")
+        if not pdfprint.pdf_printer_installed():
+            return say("The Microsoft Print to PDF printer is not installed on this computer, so I cannot make the PDF. "
+                       "It can be switched on in Windows features, or IT can add it.")
+        dest_name = choice.get("folder") or ("Desktop" if source.parent not in pdfprint._folders() else
+                                             next((f for f in pdfprint.FOLDERS if pdfprint.folder_path(f) == source.parent), "Desktop"))
+        target = pdfprint.free_path(pdfprint.folder_path(dest_name), pdfprint.safe_filename(source.stem, source.stem, "pdf"))
+        label = f"Save {source.name} as {target.name} in {dest_name}"
+        return {
+            "diagnosis": (f"I found your document {source.name}. Windows' virtual printer \"Microsoft Print to PDF\" can turn "
+                          f"it into a PDF named {target.name} in your {dest_name} folder."),
+            "fix": "computer_use_task", "reason": "", "risk": policy.R1,
+            "summary": f"Save {source.name} as a PDF in {dest_name}",
+            "what_changes": (f"The file {source.name} is sent to the virtual printer \"Microsoft Print to PDF\" (nothing is printed "
+                             f"on paper) and saved as {target} . Your original file is not changed."),
+            "steps": [{"tool": "save_as_pdf", "args": {"file": source.name if len(pdfprint.find_documents(source.name, 2)) == 1
+                                                      else str(source), "name": target.stem, "folder": dest_name},
+                       "domain": "computer_use", "label": label}],
+            "expected_file": str(target), "verify": "file",
         }
 
     def plan_open_folder(self, folder: str) -> dict:

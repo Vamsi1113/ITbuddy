@@ -249,6 +249,15 @@ Tobi works out where the user is, then applies THAT ODC's rules (`organisation` 
 - Every rule is cited from the SOP (id, version, section). The printers, networks and seats in config.yaml and
   `organisation/` are **samples**: replace them with your organisation's.
 
+## Save a document as a PDF (virtual printer)
+
+"Convert my itbuddy test note to a PDF using my printer" (or "save my report as PDF on the desktop") makes Tobi do what
+a user does by hand with **Microsoft Print to PDF**: it finds the document from the words you used (Desktop, Documents and
+Downloads, typos tolerated; it asks if two documents match), sends it to the virtual printer, types the new file's name
+in the "Save Print Output As" window and presses Save, then checks the PDF exists. It needs approval, prints nothing on
+paper, never overwrites (an existing name becomes `name (2).pdf`) and never changes the original. Text files, pictures and
+Word / Excel / PowerPoint documents are supported; a file that is already a PDF is left alone.
+
 ## Hands-on computer tasks
 
 Tobi does things for you instead of only explaining them. Each change is approved first (Level 1), the live view shows

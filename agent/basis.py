@@ -164,6 +164,16 @@ def _file_line(out: dict) -> list[str]:
     return [_line("File", text)]
 
 
+def _saved_pdf_lines(state: dict) -> list[str]:
+    """Save-as-PDF: which document became which PDF, and that nothing was printed on paper."""
+    for r in state.get("fix_results") or []:
+        if isinstance(r, dict) and r.get("saved_as") and r.get("from"):
+            folder = str(r.get("folder") or "").replace("\\", "/").rstrip("/").split("/")[-1]
+            return [_line("File", f"{r['from']} → {r.get('file_name', '')} ({folder})"),
+                    _line("Rule", "saved with the virtual printer: nothing printed on paper, original unchanged")]
+    return []
+
+
 def _source_lines(out: dict, proposal: dict) -> list[str]:
     cites: list[str] = []
     for tool in ("get_workplace_sop", "lookup_sop", "search_knowledge_base", "search_knowledge_base_rag", "lookup_policy"):
@@ -225,6 +235,7 @@ def build(state: dict) -> list[str]:
     lines += _context_lines(out)
     lines += _rule_lines(out)
     lines += _file_line(out)
+    lines += _saved_pdf_lines(state)
     lines += _source_lines(out, proposal)
     if not any(l.startswith(("**Rule", "**Source")) for l in lines):
         lines += _checked_line(out)                     # measurements matter when no rule or source explains the answer

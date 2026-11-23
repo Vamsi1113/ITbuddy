@@ -272,6 +272,9 @@ def _diagnose_computer_use(state: State) -> dict:
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_write_note(choice)}
         if choice["task"] == "open_folder":
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_folder(choice["folder"])}
+        if choice["task"] == "save_as_pdf":
+            proposal = COMPUTER_USE.plan_save_as_pdf(choice)
+            return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
         if choice["task"] == "search_web":
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_search_web(choice)}
         if choice["task"] == "find_site":
