@@ -155,7 +155,8 @@ class Api:
                     state = result["state"]
                     self._memory.add("assistant", state.get("report", ""))
                     self._push(type="done", task_id=result["task_id"], outcome=state.get("outcome"),
-                               report=state.get("report", ""), comparison=state.get("comparison") or [])
+                               report=state.get("report", ""), comparison=state.get("comparison") or [],
+                               basis=state.get("basis") or [])
                     self._note_unread()
             except Exception as e:           # never leave the page waiting
                 self._push(type="error", message=f"{type(e).__name__}: {str(e)[:300]}")

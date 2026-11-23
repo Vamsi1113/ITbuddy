@@ -166,9 +166,9 @@ def render_comparison(rows: list[dict]) -> None:
 
 def render_message(msg: dict, index: int) -> None:
     with st.chat_message(msg["role"], avatar=assistant_avatar() if msg["role"] == "assistant" else None):
-        if msg.get("steps"):
+        if msg.get("basis") or msg.get("steps"):
             with st.expander("Steps taken", expanded=False):
-                for line in msg["steps"]:
+                for line in (msg.get("basis") or msg["steps"]):      # the rules and sources behind the answer
                     st.markdown(line)
         if msg.get("outcome"):
             st.markdown(f"**{OUTCOME_LABELS.get(msg['outcome'], msg['outcome'])}**")
@@ -195,6 +195,7 @@ def finish(result: dict, steps: list[str]) -> None:
         st.session_state.messages.append({
             "role": "assistant", "content": state.get("report", ""), "outcome": state.get("outcome"),
             "comparison": state.get("comparison"), "steps": steps, "task_id": result["task_id"],
+            "basis": state.get("basis") or [],
         })
         st.session_state.pending = None
 

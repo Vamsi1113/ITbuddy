@@ -13,7 +13,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from agent import autopilot, live, memory, router, specialists
+from agent import autopilot, basis, live, memory, router, specialists
 from agent.llm import ModelError
 from agent.specialists import COMPUTER_USE, DOMAINS, LABELS
 from appconfig import cfg, data_path
@@ -43,6 +43,7 @@ class State(TypedDict, total=False):
     original_request: str  # what the user typed, before a follow-up was made standalone
     report: str
     error: str
+    basis: list            # the short "Steps taken" lines: the rules, sources and checks behind the answer
     tool_calls: int
     mode: str              # "autopilot" forces the general agent
     auto_history: list     # Autopilot: what it did and saw so far
@@ -441,7 +442,11 @@ def report_node(state: State) -> dict:
     report = "\n\n".join(p.strip() for p in parts if p and p.strip())
     audit.log_event(state["task_id"], "report", agent=agent, detail={"outcome": outcome, "report": report})
     audit.finish_task(state["task_id"], agent, outcome, report)
-    return {"report": report, "outcome": outcome}
+    try:
+        lines = basis.build({**state, "outcome": outcome})
+    except Exception:                  # the explanation must never break an answer
+        lines = []
+    return {"report": report, "outcome": outcome, "basis": lines}
 
 
 # ---------------------------------------------------------------------------

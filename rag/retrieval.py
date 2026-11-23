@@ -302,7 +302,7 @@ def _vector_matrix(dims: int):
     if _VEC_CACHE["key"] != key:
         ids, rows = [], []
         for r in conn.execute("SELECT chunk_id, embedding FROM chunks WHERE embedding IS NOT NULL"):
-            vec = _embedder.unpack(r["embedding"])
+            vec = _embedder.unpack(r["embedding"], _embedder.model_tag())
             if vec is not None and len(vec) == dims:          # skip vectors from a different model
                 ids.append(r["chunk_id"])
                 rows.append(vec)

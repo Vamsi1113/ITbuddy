@@ -541,7 +541,9 @@ def backfill_embeddings() -> int:
     """Embed chunks that have no vector yet (e.g. after installing sentence-transformers). Returns count."""
     if not _embedder.dense_enabled():
         return 0
-    rows = get_conn().execute("SELECT chunk_id FROM chunks WHERE embedding IS NULL").fetchall()
+    # chunks with no vector, or one made by a different embedding model (the model was changed or withdrawn)
+    rows = get_conn().execute("SELECT chunk_id FROM chunks WHERE embedding IS NULL OR embedding NOT LIKE ?",
+                              (f"f16:{_embedder.model_tag()}:%",)).fetchall()
     ids = [r["chunk_id"] for r in rows]
     if not ids:
         return 0

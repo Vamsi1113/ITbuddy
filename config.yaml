@@ -318,7 +318,8 @@ rag:
   # Vector search: "nvidia" = NVIDIA hosted embeddings (same NVIDIA_API_KEY as the chat model, nothing to install),
   # "local" = sentence-transformers on this PC, "none" = keyword search only.
   embedding_provider: nvidia
-  nvidia_embedding_model: "nvidia/nemotron-3-embed-1b"
+  # Tried in order; a model NVIDIA has withdrawn is skipped automatically (vectors are re-made for the new one).
+  nvidia_embedding_models: ["nvidia/nemotron-3.5-embed-1b", "nvidia/nemotron-3-embed-1b"]
   vendor_trust: 0.8                     # imported Microsoft Learn articles rank a little below the company KB
   # When the knowledge base has nothing relevant, answer from the model's general knowledge (clearly labelled)
   general_knowledge_fallback: true

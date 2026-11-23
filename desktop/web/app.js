@@ -111,6 +111,12 @@
     unsupported: ['warn', 'I need a little more detail'], error: ['bad', 'Stopped with an error'],
   };
 
+  // "**Rule:** text" -> <b>Rule</b> text (the text is escaped first)
+  function basisLine(line) {
+    const m = String(line).match(/^\*\*(.+?):\*\*\s*(.*)$/);
+    return m ? `<b>${esc(m[1])}</b><span>${esc(m[2])}</span>` : `<span>${esc(line)}</span>`;
+  }
+
   async function deliver(e) {
     const parts = chunks(e.report);
     const [kind, label] = OUTCOME[e.outcome] || ['warn', e.outcome || 'Done'];
@@ -124,8 +130,10 @@
       if (last && e.comparison && e.comparison.length) {
         html += `<table class="cmp"><tr><th>Check</th><th>Before</th><th>After</th></tr>${e.comparison.map((r) => `<tr><td>${esc(r.metric)}</td><td>${esc(r.before)}</td><td>${esc(r.after)}</td></tr>`).join('')}</table>`;
       }
-      if (last && state.steps.length) html += `<div><button class="steps-toggle" data-steps>${state.steps.length} step${state.steps.length > 1 ? 's' : ''}</button></div>`;
-      addRow({ who: 'in', html });
+      const basis = last && e.basis && e.basis.length ? e.basis : null;
+      if (basis) html += `<div><button class="steps-toggle" data-steps>Steps taken</button></div>`;
+      const row = addRow({ who: 'in', html });
+      if (basis) { const bubble = row && row.querySelector('.bubble'); if (bubble) bubble._basis = basis; }
     }
   }
 
@@ -276,7 +284,8 @@
     if (t.hasAttribute && t.hasAttribute('data-steps')) {
       const b = t.closest('.bubble'); let box = b.querySelector('.steps');
       if (box) { box.remove(); return; }
-      b.insertAdjacentHTML('beforeend', `<div class="steps">${state.lastSteps.map((s) => `<div><b>${esc(s.agent || '')}</b> ${esc(s.text || '')}</div>`).join('')}</div>`); scroll(); return;
+      const lines = b._basis || [];
+      b.insertAdjacentHTML('beforeend', `<div class="steps">${lines.map((l) => `<div>${basisLine(l)}</div>`).join('')}</div>`); scroll(); return;
     }
     if (!e.target.closest('#menu') && !e.target.closest('#btn-menu')) $('#menu').hidden = true;
   });
