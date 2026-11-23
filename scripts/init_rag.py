@@ -47,6 +47,11 @@ def main():
     print(f"      Files scanned : {ingest_stats['files_scanned']}")
     print(f"      Chunks added  : {ingest_stats['chunks_added']}")
     print(f"      Chunks skipped: {ingest_stats['chunks_skipped']} (unchanged)")
+    from rag.sop_ingest import ingest_sop_files
+    sop_stats = ingest_sop_files(force=args.force)
+    print(f"      SOPs scanned  : {sop_stats['files_scanned']} (kb_sop/), sections added {sop_stats['chunks_added']}")
+    for err in sop_stats["errors"]:
+        print(f"      SOP skipped   : {err}")
 
     # Step 3: Sample error codes (optional demo data)
     print("\n[3/3] Ingesting sample error code catalog...")

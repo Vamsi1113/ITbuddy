@@ -162,6 +162,20 @@ desktop:
   # Only used if pasting fails and the text has to be typed key by key.
   type_delay_seconds: 0.03
 
+# Organisation: ODCs (offices / delivery centres) and how to recognise them. Used to pick the SOPs that apply.
+# SAMPLE values: replace with your organisation's ODCs, subnets and computer-name prefixes.
+organisation:
+  odc_override: ""              # force one ODC for this PC (kiosks, testing); empty = detect
+  odcs:
+    HYD-ODC-2:
+      name: "Hyderabad ODC 2"
+      subnets: ["10.42.16.0/20"]
+      hostname_prefixes: ["HYD2-"]
+    PUNE-ODC-1:
+      name: "Pune ODC 1"
+      subnets: ["10.51.0.0/20"]
+      hostname_prefixes: ["PUN1-"]
+
 automation:
   max_record_seconds: 30        # longest screen recording Tobi will make
   record_fps: 15

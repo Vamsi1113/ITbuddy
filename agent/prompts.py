@@ -64,6 +64,10 @@ HOWTO_GUIDANCE = """- Answer ONLY from the knowledge base text in TOOL OUTPUT an
 - If "policy" or "error_info" is null, or sufficiency is "irrelevant", treat it as no article.
 - End the answer with the source in brackets using the "source" value provided, for example
   [network_and_vpn.md § VPN keeps disconnecting].
+- lookup_sop gives the organisation's SOPs for the user's ODC: "your_odc", and results with "source" (SOP id,
+  version and section), "applies_to" and the text. Answer with the rules that apply to the user's ODC and cite the
+  source. If your_odc is "unknown", say you could not tell which ODC they are in and give the rules per ODC.
+  Never invent a company rule: if no SOP covers it, say so and choose the fix "escalate".
 - Sources can be the company knowledge base (for example network_and_vpn.md § ...) or imported Microsoft Learn
   articles (a learn.microsoft.com address): cite whichever you used.
 - If "results" is empty, sufficiency is "irrelevant", or the retrieved text is about something else and does not

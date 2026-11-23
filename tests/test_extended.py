@@ -194,8 +194,8 @@ def test_every_domain_prompt_fits_the_context_window():
     ("How do I connect to the VPN?", "search_knowledge_base"),
     ("Outlook shows error 0x800CCC0E", "lookup_error_code"),
     ("blue screen DRIVER_IRQL_NOT_LESS_OR_EQUAL", "lookup_error_code"),
-    ("What is the BYOD policy?", "lookup_policy"),
-    ("Am I allowed to plug in a USB stick?", "lookup_policy"),
+    ("What is the BYOD policy?", "lookup_sop"),
+    ("Am I allowed to plug in a USB stick?", "lookup_sop"),
     ("Has this happened before? similar tickets for vpn drops", "find_similar_tickets"),
 ])
 def test_howto_planner_routes_to_the_right_knowledge_tool(request_text, tool):

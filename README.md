@@ -211,6 +211,24 @@ Intune, Defender ...), each connector with its status (ready / needs setup / swi
   company's own rules or systems are never guessed: Tobi offers a ticket instead. Turn it off with
   `rag.general_knowledge_fallback: false`.
 
+## Organisation SOPs (Phase 1: SOP knowledge base)
+
+Tobi answers "what is the rule here?" from your organisation's SOPs, and only uses the SOPs that apply to the user.
+
+- **Where SOPs live**: `kb_sop/`, as Markdown, Word (.docx) or PDF, each with metadata (SOP id, title, version,
+  effective date, owner, which ODCs it applies to, access groups, draft or approved). See `kb_sop/README.md`.
+  Three sample SOPs are included (printing in two demo ODCs, and temp-file housekeeping for all ODCs).
+- **Which ODC the user is in**: `organisation.odcs` in config.yaml lists each ODC's subnets and computer-name
+  prefixes; `odc_override` (or the `ITBUDDY_ODC` environment variable) forces one. When nothing matches, Tobi says it
+  could not tell and gives each ODC's rule separately.
+- **What the user sees**: questions like "which printers can I use in my ODC?" or "can I print a Word document in
+  colour?" go to the `lookup_sop` tool, which returns only that ODC's SOP sections (plus company-wide ones, and
+  restricted SOPs only for members of their groups). Answers cite the SOP id, version and section, for example
+  `[SOP-IT-PRN-005 Printing in Pune ODC 1 v1.4 § Approved printers]`. Draft SOPs are never used. If no SOP covers a
+  question, Tobi does not invent a rule: it offers a ticket.
+- Next phases (see the design plan): a structured rules catalogue and an SOP check before every action (Phase 2),
+  print-with-SOP (Phase 3) and Storage Watch (Phase 4).
+
 ## Hands-on computer tasks
 
 Tobi does things for you instead of only explaining them. Each change is approved first (Level 1), the live view shows

@@ -256,6 +256,78 @@ def lookup_policy(topic: str, role_filter: str = "any") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Tool: sop.lookup  (the organisation's SOPs, only those that apply to this user's ODC and groups)
+# ---------------------------------------------------------------------------
+def _compact_tables(text: str) -> str:
+    """Markdown tables -> one line per row ("Printer: X; Colour: Black and white"): the same facts in far fewer
+    characters, so a rule after a table is not cut off by the output limit."""
+    lines, header, out = text.splitlines(), None, []
+    for line in lines:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.strip().startswith("|") else None
+        if cells is None:
+            header = None
+            out.append(line)
+        elif all(set(c) <= set("-: ") for c in cells):
+            continue                                            # the | --- | line
+        elif header is None:
+            header = cells
+        else:
+            out.append("- " + "; ".join(f"{h}: {v}" for h, v in zip(header, cells) if v))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+@tool(
+    "howto", R0,
+    "Look up the organisation's SOP (standard operating procedure) and rules for a topic, for example printing, "
+    "USB drives, software requests or temp files. Returns only the SOPs that apply to this user's ODC and groups, "
+    "with the SOP id, version and section to cite.",
+    params=(Param("topic", "str", "what the SOP should cover, in the user's words", max_len=300),),
+)
+def lookup_sop(topic: str) -> dict:
+    from tools.org_context import detect_odc, user_groups
+    odc = detect_odc()
+    groups = user_groups()
+    # the organisation's SOPs first; general company policy articles only when no SOP answers it
+    wide = 4 if odc["odc"] else 10                      # ODC unknown: look wider so every ODC's SOP can be shown
+    response = retrieve_with_fallback(topic, RetrievalFilters(doc_types=["sop"], odc=odc["odc"], acl_groups=groups),
+                                      top_k=wide, log_gaps=False)
+    if response["sufficiency"] != "sufficient":
+        # no strong SOP match: search SOPs and company policy articles together and keep the better answer
+        both = retrieve_with_fallback(topic, RetrievalFilters(doc_types=["sop", "policy"], odc=odc["odc"],
+                                                              acl_groups=groups), top_k=wide)
+        if both["relevance"] > response["relevance"] or _no_answer(response):
+            response = both
+    your_odc = odc["odc"] or "unknown"
+    if _no_answer(response):
+        return {"ok": True, "your_odc": your_odc, "results": [], "sufficiency": response["sufficiency"],
+                "note": "No SOP covers this for your ODC. Do not guess a company rule: offer a ticket."}
+    results = []
+    rows = [r for r in response["results"] if r.doc_type in ("sop", "policy")]
+    if not odc["odc"]:
+        # ODC unknown: take the best section of EACH ODC first, so every ODC's rule fits in the answer
+        firsts, seen = [], set()
+        for r in rows:
+            if r.region not in seen:
+                seen.add(r.region)
+                firsts.append(r)
+        rows = firsts + [r for r in rows if r not in firsts]
+    budget = 420 if odc["odc"] else 330                 # 3 full sections fit in the tool output limit
+    for r in rows[:3]:
+        scope = r.region.strip("|").replace("|", ", ") or "all ODCs"
+        text = _compact_tables(_sanitize(r.parent_text or r.text))
+        if len(text) > budget:
+            text = text[:budget].rsplit(" ", 1)[0] + " ..."
+        results.append({"source": r.citation, "applies_to": scope, "effective_date": r.effective_date or "",
+                        "text": text})
+    out = {"ok": True, "your_odc": your_odc, "odc_detected_by": odc["how"],
+           "sufficiency": response["sufficiency"], "results": results}
+    if not odc["odc"]:
+        out["note"] = ("The user's ODC could not be detected. Say so, give each ODC's rule separately (applies_to), "
+                       "and ask which ODC they are in.")
+    return fit_output(out)
+
+
+# ---------------------------------------------------------------------------
 # Tool: tickets.find_similar
 # ---------------------------------------------------------------------------
 @tool(

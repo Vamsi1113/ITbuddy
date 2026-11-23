@@ -74,6 +74,8 @@ def ensure_rag_index(background: bool = True) -> None:
             if current["total_chunks"] == 0 or _kb_files_changed():
                 ingest_kb_files(force=False)
             ingest_vendor_files()                  # imported Microsoft Learn articles (only changed files)
+            from rag.sop_ingest import ingest_sop_files
+            ingest_sop_files()                     # the organisation's SOPs in kb_sop/ (only changed files)
             if not current["by_doc_type"].get("error_code"):
                 from rag.error_catalog import SAMPLE_ERROR_CODES
                 ingest_error_codes(SAMPLE_ERROR_CODES)

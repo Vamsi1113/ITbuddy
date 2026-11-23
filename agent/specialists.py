@@ -124,6 +124,9 @@ LABELS = {name: d.label for name, d in DOMAINS.items()}
 _HOWTO_ERROR = re.compile(r"(?<!\w)(0x[0-9a-fA-F]{4,}|[A-Z]{2,}_[A-Z_]{2,}|error\s+(code\s+)?\d{3,})(?!\w)")
 _HOWTO_POLICY = re.compile(r"(?<!\w)(policy|policies|byod|acceptable use|am i allowed|are we allowed|allowed to|"
                            r"company rules?|compliance)(?!\w)", re.IGNORECASE)
+_HOWTO_SOP = re.compile(r"(?<!\w)(sops?|standard operating|procedures?|odc|am i allowed|are we allowed|allowed to|"
+                        r"which printers?|what printers?|rules? for|company rules?|allowed|"
+                        r"can\s+(?:i|we)\s+(?:print|use|install|bring|plug|connect|copy|share))(?!\w)", re.IGNORECASE)
 _HOWTO_TICKETS = re.compile(r"(?<!\w)((similar|past|previous|earlier)\s+(tickets?|incidents?|cases?)|"
                             r"(happened|seen)\s+before)(?!\w)", re.IGNORECASE)
 
@@ -135,8 +138,9 @@ def route_howto(request: str) -> list[dict]:
         return [{"tool": "lookup_error_code", "args": {"code_or_message": q}}]
     if _HOWTO_TICKETS.search(q):
         return [{"tool": "find_similar_tickets", "args": {"symptoms": q}}]
-    if _HOWTO_POLICY.search(q):
-        return [{"tool": "lookup_policy", "args": {"topic": q}}]
+    if _HOWTO_SOP.search(q) or _HOWTO_POLICY.search(q):
+        tool = "lookup_sop" if "lookup_sop" in TOOLS else "lookup_policy"
+        return [{"tool": tool, "args": {"topic": q}}]
     return [{"tool": "search_knowledge_base", "args": {"query": q}}]
 
 

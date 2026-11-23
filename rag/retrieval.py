@@ -35,7 +35,7 @@ from rag.index import (
 
 # Default trust order (§5.3). config.yaml `rag.doc_type_trust` overrides it.
 _DEFAULT_DOC_TYPE_PRIORITY = {
-    "error_code": 1.0, "runbook": 0.95, "kb": 0.9, "policy": 0.85, "ticket": 0.7, "faq": 0.65, "vendor": 0.6,
+    "error_code": 1.0, "sop": 1.0, "runbook": 0.95, "kb": 0.9, "policy": 0.85, "ticket": 0.7, "faq": 0.65, "vendor": 0.6,
 }
 
 
@@ -88,6 +88,8 @@ class RetrievalResult:
     risk_tier: str = "R0"
     last_reviewed: str = ""
     version: str = "1"
+    region: str = ""               # '|ODC|...|' for ODC-specific SOPs, '' = everywhere
+    effective_date: str = ""
     snippet: str = ""              # compressed excerpt
     citation: str = ""             # e.g. "[network_and_vpn.md § VPN keeps disconnecting]"
     source_system: str = "kb"
@@ -111,6 +113,7 @@ class RetrievalFilters:
     acl_groups: list[str] = field(default_factory=list)  # the user's group memberships
     status: str = "approved"
     exclude_expired: bool = True
+    odc: str = ""                                         # the user's ODC: SOPs for other ODCs are left out
 
     def to_sql_clauses(self) -> tuple[str, list]:
         """Return (WHERE clause fragment, parameters). Applied BEFORE ranking (pre-filter, §7)."""
@@ -135,6 +138,11 @@ class RetrievalFilters:
             acl += " OR acl_groups LIKE ? ESCAPE '\\'"
             params.append("%" + _like_escape(json.dumps(grp)) + "%")
         clauses.append(acl + ")")
+
+        if self.odc:
+            # content without an ODC applies everywhere; ODC-specific content only to that ODC (never relaxed)
+            clauses.append("(region IS NULL OR region = '' OR region LIKE ? ESCAPE '\\')")
+            params.append("%|" + _like_escape(self.odc) + "|%")
 
         if self.exclude_expired:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -470,6 +478,9 @@ def make_citation(row: dict) -> str:
         name = url[3:].split("#")[0]
     elif url.startswith("ticket:"):
         return f"[ticket {url[7:]}]"
+    elif url.startswith("sop/"):
+        version = row.get("version") or "1"
+        return f"[{row.get('title') or url[4:].split('#')[0]} v{version} § {heading}]"   # SOP id, version, section
     elif url.startswith("https://learn.microsoft.com/"):
         title = row.get("title") or heading
         return f"[Microsoft Learn: {title} – {url.split('#')[0]}]"     # imported article: cite the real page
@@ -581,6 +592,8 @@ def hybrid_search(
             risk_tier=row.get("risk_tier", "R0"),
             last_reviewed=row.get("last_reviewed", ""),
             version=row.get("version", "1"),
+            region=row.get("region") or "",
+            effective_date=row.get("effective_date") or "",
             snippet=_make_snippet(row.get("text_original", ""), query),
             citation=make_citation(row),
             source_system=row.get("source_system", "kb"),

@@ -187,10 +187,13 @@ def _chunk_id(doc_id: str, section_path: str, index: int = 0) -> str:
 # Markdown KB parser (§3.1 structure-aware)
 # ---------------------------------------------------------------------------
 def parse_markdown_file(path: Path, doc_id: str | None = None, base_url: str | None = None,
-                        source_system: str = "kb", trust: float = 1.0, doc_type: str | None = None) -> list[Chunk]:
+                        source_system: str = "kb", trust: float = 1.0, doc_type: str | None = None,
+                        text: str | None = None) -> list[Chunk]:
     """Parse a KB markdown file into structured chunks. The keyword arguments are used for imported vendor
-    documentation: its own doc id and web address, a lower trust and a fixed doc type."""
-    text = path.read_text(encoding="utf-8", errors="replace")
+    documentation and SOPs: their own doc id and address, trust, a fixed doc type, and already-converted text
+    (Word / PDF SOPs)."""
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
 
     # Extract H1 title

@@ -34,6 +34,11 @@ _AUTOPILOT = re.compile(
     r"files?|documents?|powershell|servicenow|incidents?|intune|web ?page|online)(?!\w)", re.IGNORECASE)
 
 
+_SOP_QUESTION = re.compile(
+    r"(?<!\w)(sops?|standard operating procedures?|(?:which|what) printers?\s+(?:can|may|am|should|do)|"
+    r"am i allowed|are we allowed|allowed to|(?:rules?|polic(?:y|ies))\s+(?:for|on|about)|in my odc|my odc|"
+    r"(?:is|are)\s+[\w\s-]{1,40}?\s+allowed|can\s+(?:i|we)\s+(?!not\b)(?:print|use|install|bring|plug|connect|copy|share))(?!\w)",
+    re.IGNORECASE)
 _SCREEN_TASK = re.compile(
     r"(?<!\w)(record(?:ing)?(?!\w).{0,30}(?<!\w)(?:screen|desktop|display)(?!\w)|"
     r"screen\s*record(?:ing)?|take\s+(?:a\s+|me\s+a\s+)?screen\s*shot|screen\s*shot\s+(?:of|my)|capture\s+(?:my\s+|the\s+)?screen)",
@@ -52,6 +57,8 @@ def fast_route(request: str) -> dict | None:
         return {"agent": "autopilot", "question": ""}
     if _HOWTO_QUESTION.match(request):
         return {"agent": "howto", "question": ""}
+    if _SOP_QUESTION.search(request):
+        return {"agent": "howto", "question": ""}              # what the SOP says: before any troubleshooting
     if printing.is_print_request(request):
         return {"agent": "devices", "question": ""}
     if _SCREEN_TASK.search(request) and not _HOW_ANYWHERE.search(request):
