@@ -229,6 +229,26 @@ Tobi answers "what is the rule here?" from your organisation's SOPs, and only us
 - Next phases (see the design plan): a structured rules catalogue and an SOP check before every action (Phase 2),
   print-with-SOP (Phase 3) and Storage Watch (Phase 4).
 
+## Workplace rules: printers, Wi-Fi, VPN for the user's ODC
+
+Tobi works out where the user is, then applies THAT ODC's rules (`organisation` in config.yaml, SOPs in `kb_sop/`).
+
+- **Kind of computer**: physical PC, virtual machine, remote desktop, or **AVD** (virtual desktop). In an AVD the
+  cloud host's network says nothing about where the user sits, and only printers redirected from the user's own PC (or
+  mapped by IT) exist, so Tobi says so instead of pretending.
+- **Where the user is** (first match wins): override, what the user told Tobi (saved on this PC), the network (the
+  remote PC's IP in a remote session when Windows exposes it; else this PC's IP, with a floor per subnet), the seat table
+  `organisation/seats.csv` (computer or remote-PC name -> ODC, floor, seat), computer-name prefix, security group.
+  If nothing matches Tobi asks once ("Which ODC do you sit in?") and remembers the answer ("New chat" does not forget it).
+- **Printers**: "which printer should I use?" compares the ODC's printer list with what is installed here. Each printer
+  is `ready`, `offline`, `add_first` (with the exact steps and queue path) or `not_allowed` (with the reason: group, file
+  type, ...), the printer on the user's floor first, with conditions (secure release, page limits, approvals). For a named
+  file it checks type and page count. Printing it (`print_file`) needs approval and only goes to a `ready` printer.
+- **Wi-Fi and VPN**: "which wifi can I connect to?" gives the ODC's corporate and guest networks, tells the user if the
+  PC is on the wrong one, and gives the VPN rule for when it is needed.
+- Every rule is cited from the SOP (id, version, section). The printers, networks and seats in config.yaml and
+  `organisation/` are **samples**: replace them with your organisation's.
+
 ## Hands-on computer tasks
 
 Tobi does things for you instead of only explaining them. Each change is approved first (Level 1), the live view shows

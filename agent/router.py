@@ -34,6 +34,14 @@ _AUTOPILOT = re.compile(
     r"files?|documents?|powershell|servicenow|incidents?|intune|web ?page|online)(?!\w)", re.IGNORECASE)
 
 
+_WORKPLACE = re.compile(
+    r"(?<!\w)((?:which|what)\s+(?:printers?|wi-?fi|wifi\s+network|networks?|vpn|ssid)|"
+    r"(?:where|which\s+\w+)\s+(?:can|should|do)\s+i\s+print|where\s+(?:do|can|should)\s+i\s+(?:print|connect)|"
+    r"(?:which|what)\s+(?:odc|floor|seat|office)\s+(?:am|is)|where\s+am\s+i\s+(?:sitting|located)|my\s+(?:odc|seat|floor)|"
+    r"i\s+(?:am|m|sit|work)\s+(?:in|at|from)\s+(?:odc|the\s+\w+\s+odc)|are\s+we\s+on\s+(?:avd|a\s+virtual)|"
+    r"(?:am\s+i|is\s+this)\s+(?:on|in)\s+(?:an?\s+)?(?:avd|virtual\s+desktop|physical)|"
+    r"(?:print|send)\s+(?:this|that|the|my|a)?\s*[\w\-. ()]{1,60}\.(?:pdf|docx?|xlsx?|pptx?|txt|png|jpe?g)|"
+    r"printers?\s+(?:available|near|on\s+my\s+floor|in\s+my))(?!\w)", re.IGNORECASE)
 _SOP_QUESTION = re.compile(
     r"(?<!\w)(sops?|standard operating procedures?|(?:which|what) printers?\s+(?:can|may|am|should|do)|"
     r"am i allowed|are we allowed|allowed to|(?:rules?|polic(?:y|ies))\s+(?:for|on|about)|in my odc|my odc|"
@@ -57,6 +65,8 @@ def fast_route(request: str) -> dict | None:
         return {"agent": "autopilot", "question": ""}
     if _HOWTO_QUESTION.match(request):
         return {"agent": "howto", "question": ""}
+    if _WORKPLACE.search(request) and not _HOW_ANYWHERE.search(request):
+        return {"agent": "workplace", "question": ""}
     if _SOP_QUESTION.search(request):
         return {"agent": "howto", "question": ""}              # what the SOP says: before any troubleshooting
     if printing.is_print_request(request):

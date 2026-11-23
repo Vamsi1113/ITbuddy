@@ -1,5 +1,6 @@
 """SOP knowledge base: ingestion with ODC / version / access tags, ODC-aware search, citations, routing."""
 import ipaddress
+import os
 
 import pytest
 
@@ -161,6 +162,11 @@ def odcs(monkeypatch):
     monkeypatch.delenv("ITBUDDY_ODC", raising=False)
     monkeypatch.setattr(org_context, "odc_catalogue", lambda: ODCS)
     monkeypatch.setattr(org_context, "cfg", lambda *a, default=None: default)
+    monkeypatch.setattr(org_context, "PROFILE_FILE", __import__("pathlib").Path("no-such-profile.json"))
+    monkeypatch.setattr(org_context, "seat_table", lambda: [])
+    monkeypatch.setattr(org_context, "user_groups", lambda: [])
+    monkeypatch.setattr(org_context, "environment", lambda: {"kind": "physical", "computer": os.environ.get("COMPUTERNAME", ""),
+                                                             "client_name": "", "client_ip": "", "remote": False})
     return monkeypatch
 
 
@@ -202,7 +208,7 @@ def test_tables_are_compacted_for_the_model():
     assert "- Printer: P1; Colour: Black and white" in out and "---" not in out and "No colour." in out
 
 
-@pytest.mark.parametrize("text", ["what is the SOP for printing?", "which printers can I use in my ODC?",
+@pytest.mark.parametrize("text", ["what is the SOP for printing?",
                                   "can I print a word document in colour?", "is colour printing allowed here?",
                                   "am I allowed to use a USB drive?"])
 def test_sop_questions_go_to_the_knowledge_agent(text):

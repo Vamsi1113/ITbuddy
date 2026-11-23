@@ -166,15 +166,55 @@ desktop:
 # SAMPLE values: replace with your organisation's ODCs, subnets and computer-name prefixes.
 organisation:
   odc_override: ""              # force one ODC for this PC (kiosks, testing); empty = detect
+  seats_file: "organisation/seats.csv"   # computer (or remote PC) name -> ODC, floor, seat
+  # Each ODC: how to recognise it (subnets, floors, computer-name prefixes, security groups) and ITS rules for
+  # printers, Wi-Fi and VPN. In a virtual desktop (AVD) the user's own PC is the one that sits in the office, so
+  # when Windows does not tell Tobi where that PC is, Tobi asks the user once and remembers the answer.
   odcs:
     HYD-ODC-2:
       name: "Hyderabad ODC 2"
       subnets: ["10.42.16.0/20"]
+      floors: { "3": ["10.42.17.0/24"], "5": ["10.42.19.0/24"] }
       hostname_prefixes: ["HYD2-"]
+      groups: ["HYD2-All-Staff"]
+      printing_sop: "SOP-IT-PRN-004 v3.1"
+      network_sop: "SOP-IT-NET-002 v2.0"
+      printers:
+        - { name: "HYD2-F3-Mono-01", queue: "\\\\printsrv-hyd\\HYD2-F3-Mono-01", floor: "3", location: "3rd floor, near the pantry",
+            colour: false, accepts: [pdf, docx, xlsx, pptx, txt, png, jpg], max_pages: 100, secure_release: true }
+        - { name: "HYD2-F3-Colour-02", queue: "\\\\printsrv-hyd\\HYD2-F3-Colour-02", floor: "3", location: "3rd floor, print room",
+            colour: true, accepts: [pdf, docx, xlsx, pptx, png, jpg], max_pages: 30, secure_release: true,
+            allowed_groups: ["HYD2-Colour-Print"], approval: "Colour is for client deliverables and marketing material only" }
+        - { name: "HYD2-F5-Mono-03", queue: "\\\\printsrv-hyd\\HYD2-F5-Mono-03", floor: "5", location: "5th floor, east wing",
+            colour: false, accepts: [pdf, docx, xlsx, pptx, txt, png, jpg], max_pages: 100, secure_release: true }
+      wifi:
+        corporate: ["HYD2-Corp"]
+        guest: ["HYD2-Guest"]
+        notes: "Company laptops use HYD2-Corp (certificate sign-in). Personal phones may use HYD2-Guest only."
+      vpn:
+        client: "GlobalProtect"
+        gateway: "vpn-hyd.example.com"
+        when_needed: "Not needed in the office. Always connect the VPN when working from home or outside the ODC."
     PUNE-ODC-1:
       name: "Pune ODC 1"
       subnets: ["10.51.0.0/20"]
+      floors: { "0": ["10.51.1.0/24"] }
       hostname_prefixes: ["PUN1-"]
+      groups: ["PUN1-All-Staff"]
+      printing_sop: "SOP-IT-PRN-005 v1.4"
+      network_sop: "SOP-IT-NET-003 v1.0"
+      printers:
+        - { name: "PUN1-G-SecurePrint-01", queue: "\\\\printsrv-pun\\PUN1-G-SecurePrint-01", floor: "0", location: "Ground floor, security desk",
+            colour: false, accepts: [pdf], max_pages: 25, secure_release: true,
+            approval: "Every print job needs your project manager's approval (ServiceNow request)" }
+      wifi:
+        corporate: ["PUN1-Secure"]
+        guest: []
+        notes: "Pune ODC 1 has no guest Wi-Fi. Client network rules apply: only company devices on PUN1-Secure."
+      vpn:
+        client: "GlobalProtect"
+        gateway: "vpn-pun.example.com"
+        when_needed: "Not needed in the ODC. Work from home needs the client-approved VPN profile and manager approval."
 
 automation:
   max_record_seconds: 30        # longest screen recording Tobi will make

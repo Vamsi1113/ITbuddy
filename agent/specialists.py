@@ -97,6 +97,22 @@ DOMAINS: dict[str, Domain] = {d.name: d for d in (
            "who am I signed in as, do I have admin rights, when does my password expire, account details.",
            "- Password resets, unlocks and MFA need IT: choose the fix \"escalate\" for those.",
            (("get_current_user", {}),)),
+    Domain("workplace", "Workplace",
+           "where the user is and what they may do there: which ODC / office / floor / seat I am in, which printer "
+           "should I use or can I use, where can I print, which Wi-Fi or network can I connect to, which VPN, "
+           "am I on a virtual desktop, print this file.",
+           "- Use the facts in TOOL OUTPUT only: odc, floor, seat, located_by, printers (status ready / add_first / "
+           "offline / not_allowed), conditions, how_to_add, allowed_wifi, vpn_rules, guidance.\n"
+           "- Recommend ready printers first, the one on the user's floor first. For add_first give the how_to_add steps. "
+           "For not_allowed say why_not. Mention every condition (secure release, approvals, page limits).\n"
+           "- If odc is unknown say you could not tell where they sit and ask ONE question: which ODC (and floor or "
+           "seat if they know). If they tell you, choose the fix set_my_location with odc, floor and seat.\n"
+           "- If computer_type is avd, say this is a virtual desktop and use avd_note; do not claim the printers or "
+           "Wi-Fi of the user's real PC are visible.\n"
+           "- If the user asks to PRINT a file and a printer is ready, choose the fix print_file with the file and the "
+           "best ready printer. If none is ready, explain what to do instead; never print on a printer that is not ready.\n"
+           "- Cite the SOP from TOOL OUTPUT (the sop field or get_workplace_sop source) when you state a rule.",
+           (("get_my_org_context", {}),)),
     Domain("howto", "Knowledge",
            "how do I ..., company IT policy, step-by-step instructions (connect VPN, add printer, out of office, "
            "report phishing, new starter, leaving).",
@@ -144,8 +160,45 @@ def route_howto(request: str) -> list[dict]:
     return [{"tool": "search_knowledge_base", "args": {"query": q}}]
 
 
+_WP_NETWORK = re.compile(r"(?<!\w)(wi-?fi|wireless|ssid|vpn|network|internet|lan|connect(?:ed)? to)(?!\w)", re.IGNORECASE)
+_WP_PRINT = re.compile(r"(?<!\w)(print|printer|printers|printing)(?!\w)", re.IGNORECASE)
+
+
+_LEAD_WORDS = {"which", "what", "printer", "printers", "should", "i", "use", "for", "to", "on", "the", "my", "can", "please",
+               "print", "send", "this", "that", "a", "me", "it", "want", "need", "where", "is", "do", "how", "with", "file"}
+
+
+def _strip_lead_words(name: str) -> str:
+    """'printer should I use for plan.pdf' -> 'plan.pdf': a file name picked out of a sentence may carry leading words."""
+    words = (name or "").split()
+    last_filler = max((i for i, w in enumerate(words[:-1]) if w.lower() in _LEAD_WORDS), default=-1)
+    return " ".join(words[last_filler + 1:])
+
+
+def route_workplace(request: str) -> list[dict]:
+    """Which read-only checks answer a workplace question. Deterministic: no model call."""
+    q = request.strip()[:300]
+    steps = []
+    if _WP_PRINT.search(q):
+        from tools import printing
+        name = _strip_lead_words(printing.extract_file_name(q))
+        steps.append({"tool": "get_my_print_options", "args": {"file": name} if name else {}})
+        topic = "printing"
+    elif _WP_NETWORK.search(q):
+        steps.append({"tool": "get_my_network_options", "args": {}})
+        topic = "wifi vpn network access"
+    else:
+        steps.append({"tool": "get_my_org_context", "args": {}})
+        topic = ""
+    if topic and "get_workplace_sop" in TOOLS:
+        steps.append({"tool": "get_workplace_sop", "args": {"topic": f"{topic} {q}"[:300]}})      # the SOP text to cite
+    return steps
+
+
 def plan(domain: Domain, request: str) -> list[dict]:
     """Return [{"tool", "args"}]. Falls back to the domain's default plan if the model output stays malformed."""
+    if domain.name == "workplace":
+        return route_workplace(request)
     if domain.name == "howto":
         steps = route_howto(request)
         if all(st["tool"] in TOOLS for st in steps):   # RAG tools are optional; fall back to the base search
