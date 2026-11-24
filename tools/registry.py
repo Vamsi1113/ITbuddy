@@ -112,7 +112,7 @@ def catalogue_text(specs: list[ToolSpec]) -> str:
 
 
 # Importing the modules registers their tools. Keep this at the bottom.
-from tools import (account, automation, browser, desktop, devices, knowledge, logs, network,  # noqa: E402,F401
+from tools import (account, automation, browser, desktop, devices, fileops, knowledge, logs, network,  # noqa: E402,F401
                    org_context, org_rules, pdfprint, performance, printing, security, settings, software, storage,
                    tickets)
 

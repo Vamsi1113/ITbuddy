@@ -91,8 +91,8 @@ def fast_route(request: str) -> dict | None:
         return {"agent": "workplace", "question": ""}
     if _SOP_QUESTION.search(request):
         return {"agent": "howto", "question": ""}              # what the SOP says: before any troubleshooting
-    if printing.is_print_problem(request):
-        return {"agent": "devices", "question": ""}            # something is wrong with printing: troubleshoot
+    if printing.is_print_problem(request) or printing.is_print_status(request):
+        return {"agent": "devices", "question": ""}            # broken, or "is a printer connected": check this PC
     if printing.is_print_request(request):
         return {"agent": "workplace", "question": ""}          # a printer is only mentioned: it is a rules / options question
     if _SCREEN_TASK.search(request) and not _HOW_ANYWHERE.search(request):

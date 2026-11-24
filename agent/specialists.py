@@ -628,11 +628,9 @@ def print_proposal(result: dict) -> dict:
         if not fix.get("assist"):
             fixable.append(f["id"])
 
-    # Steps that only open a Windows page for the user to do it themselves are advice, not an action to approve:
-    # the explanation already says what to do, and the user can ask for the page to be opened.
+    # Steps that only open a Windows page for the user are not a fix: they are offered as a simple yes / no question
+    # under a short answer ("No printer is connected ... Want me to open the printer settings?").
     opens_page_only = bool(steps) and not fixable
-    if opens_page_only:
-        steps = []
 
     # 2. nothing wrong on the computer and a real printer exists: offer a test page to confirm
     real = [p for p in state["printers"] if not printing.is_virtual(p)]
@@ -666,12 +664,20 @@ def print_proposal(result: dict) -> dict:
     needs_it = [f for f in problems if f["needs_it"]]
     if needs_it:
         parts.append("**Needs IT**\n" + "\n".join(f"- {f['what']}" for f in needs_it))
-    if opens_page_only:
-        parts.append("Say \"open the printer settings\" and I will open that page for you.")
+    if opens_page_only and [f["id"] for f in problems] == ["no-printer"]:
+        virtual = ", ".join(p["Name"] for p in state["printers"] if printing.is_virtual(p)) or "virtual printers"
+        parts = [f"No printer is connected to this computer right now. There's only {virtual}, which saves a file "
+                 "instead of printing on paper." + (" An office printer is usually added from the company print server."
+                                                     if file_name == "" else "")]
 
     proposal = {"diagnosis": "\n\n".join(parts), "reason": "", "fix": None, "file_name": file_name,
                 "before_ids": [f["id"] for f in problems], "fixable_ids": fixable}
-    if steps:
+    if opens_page_only:
+        proposal.update(fix="printing_fix", risk=max(TOOLS[st["tool"]].risk for st in steps), steps=steps,
+                        summary="Open the printer settings", offer=True,
+                        ask="Want me to open the printer settings so you can add one?",
+                        what_changes="The Windows printer settings page opens. Nothing is changed.")
+    elif steps:
         risk = max(TOOLS[st["tool"]].risk for st in steps)
         changes = "\n".join(f"- {st['label']}: {TOOLS[st['tool']].change_note}" for st in steps)
         proposal.update(fix="printing_fix", risk=risk, steps=steps,
@@ -871,6 +877,83 @@ class ComputerUse:
         best = max(("desktop", "documents", "downloads"), key=lambda f: difflib.SequenceMatcher(None, w, f).ratio())
         return best.title() if difflib.SequenceMatcher(None, w, best).ratio() >= 0.75 else ""
 
+    _DELETE = re.compile(r"(?<!\w)(delete|remove|trash|erase|get\s+rid\s+of|bin|discard)(?!\w)", re.IGNORECASE)
+    _NOT_A_FILE = re.compile(r"(?<!\w)(app|apps|application|program|programs|software|account|user|users|printer|password|"
+                             r"email|emails|mail|history|cookies|cache|temp|temporary|browser|extension|driver|update|"
+                             r"all|every|everything|folder|folders|files)(?!\w)", re.IGNORECASE)
+    _FILE_HINT = re.compile(r"(?<!\w)(file|pdf|document|doc|docx|txt|text|note|notes|report|sheet|excel|word|image|photo|"
+                            r"picture|png|jpg|video|zip|csv|pptx?|slides)(?!\w)|\.[A-Za-z0-9]{2,5}(?![\w.])", re.IGNORECASE)
+
+    def _delete_pick(self, text: str) -> dict | None:
+        """"delete the RAGAS pdf in my desktop" -> delete_file. Programs, accounts, browser data, folders and
+        "all my files" are not this (they are uninstalls, IT jobs or bulk deletions)."""
+        if not self._DELETE.search(text) or self._PDF_HOW.search(text) or self._NOT_A_FILE.search(text):
+            return None
+        if not self._FILE_HINT.search(text):
+            return None
+        from tools.pdfprint import _FILLER, _explicit_name
+        explicit = _explicit_name(text)
+        keep_types = {"pdf", "txt", "text", "word", "excel", "docx", "xlsx", "csv", "png", "jpg", "image", "photo", "picture",
+                      "video", "zip", "pptx", "ppt", "slides", "sheet", "notes", "note", "report"}
+        tokens = [t for t in re.split(r"[^\w.-]+", text) if t and (t.lower() not in _FILLER or t.lower() in keep_types)
+                  and not self._place(t) and not self._DELETE.fullmatch(t) and len(t) > 1]
+        phrase = explicit or " ".join(tokens[:6])
+        return {"task": "delete_file", "file": phrase, "reason": ""} if phrase else None
+
+    def _open_file_pick(self, text: str) -> dict | None:
+        """"open the RAGAS pdf" -> open that file (only when such a file really exists; else it is a site or an app)."""
+        m = self._OPEN.match(text.strip())
+        if not m or not self._FILE_HINT.search(text) or self._NOT_A_FILE.search(text):
+            return None
+        if self._NOT_SIMPLE.search(text) or len(m.group(2).split()) > 7:
+            return None                                     # "open X and record / save ...": a multi-step job, not one file
+        from tools import pdfprint
+        if not pdfprint.find_documents(m.group(2), 1, kinds=None):
+            return None
+        return {"task": "open_file", "file": m.group(2).strip(" .?!"), "reason": ""}
+
+    def plan_open_file(self, choice: dict) -> dict:
+        from tools import pdfprint
+        ranked = pdfprint._ranked(choice["file"], kinds=None)
+        top = [p for s, p in ranked if ranked and ranked[0][0] - s < 0.05][:4]
+        if not top:
+            return {"diagnosis": f"I couldn't find a file called '{choice['file']}'. What's it called?", "fix": None, "reason": ""}
+        if len(top) > 1 and not pdfprint.type_hint(choice["file"]):
+            return {"diagnosis": "I found more than one: " + ", ".join(p.name for p in top) + ". Which one should I open?",
+                    "fix": None, "reason": ""}
+        target = top[0]
+        return {"diagnosis": f"Found it: {target.name} in {target.parent}.", "fix": "computer_use_task", "reason": "",
+                "risk": policy.R1, "summary": f"Open {target.name}",
+                "what_changes": f"{target.name} opens in its usual program. Nothing is changed.",
+                "steps": [{"tool": "open_file", "args": {"file": str(target)}, "domain": "computer_use", "label": f"Open {target.name}"}],
+                "expected_file": None, "verify": "steps_ok"}
+
+    def plan_delete_file(self, choice: dict) -> dict:
+        """Delete one file: find it, say exactly which one, move it to the Recycle Bin after OK."""
+        from tools import pdfprint
+        phrase = choice["file"]
+        ranked = pdfprint._ranked(phrase, kinds=None)
+        say = lambda text: {"diagnosis": text, "fix": None, "reason": ""}      # noqa: E731
+        if not ranked:
+            return say(f"I looked through your folders and drives but couldn't find a file called '{phrase}'. "
+                       "What's it called? Even part of the name is enough.")
+        top = [p for s, p in ranked if ranked[0][0] - s < 0.05][:4]
+        if len(top) > 1 and not pdfprint.type_hint(phrase):
+            names = ", ".join(f"{p.name} ({p.parent.name})" for p in top)
+            return say(f"I found more than one: {names}. Which one should I delete?")
+        target = top[0]
+        where = target.parent
+        return {
+            "diagnosis": f"Found it: {target.name} in {where}.",
+            "fix": "computer_use_task", "reason": "", "risk": policy.R1,
+            "summary": f"Move {target.name} to the Recycle Bin",
+            "ask": f"Should I delete {target.name} from {where.name}? It goes to the Recycle Bin, so you can get it back.",
+            "what_changes": f"{target} is moved to the Recycle Bin. You can restore it from there.",
+            "steps": [{"tool": "delete_file", "args": {"file": str(target)}, "domain": "computer_use",
+                       "label": f"Move {target.name} to the Recycle Bin"}],
+            "expected_file": None, "verify": "deleted", "deleted_path": str(target),
+        }
+
     def _pdf_pick(self, text: str) -> dict | None:
         """Turn a document into a PDF with the virtual printer. Recognises "convert my itbuddy test note to a pdf",
         "save my report as pdf on the desktop", and also requests with no word "pdf" in them such as "print the RAGAS
@@ -883,6 +966,8 @@ class ComputerUse:
         into_file = bool(save_place) and re.search(r"(?<!\w)print\w*(?!\w)", text, re.IGNORECASE)
         if not (has_pdf or into_file or self._VIRTUAL_PRINTER.search(text)):
             return None
+        if has_pdf and not (into_file or self._VIRTUAL_PRINTER.search(text) or self._PDF_VERB.search(text)):
+            return None                                     # "pdf" is mentioned, but nothing asks to MAKE one
         if not (has_pdf or self._DOC_WORD.search(text)):
             return None
         folder = save_place
@@ -919,6 +1004,12 @@ class ComputerUse:
         """Recognise "open <site/app>" and "install <catalogue program>" without a model call. None = not one of these."""
         text = request.strip()
         low = text.lower()
+        gone = self._delete_pick(text)
+        if gone:
+            return gone
+        opened = self._open_file_pick(text)
+        if opened:
+            return opened
         pdf = self._pdf_pick(text)
         if pdf:
             return pdf
@@ -1273,6 +1364,12 @@ class ComputerUse:
     def verify(self, runner: ToolRunner, state: dict) -> dict:
         proposal = state["proposal"]
         results = state.get("fix_results") or [{}]
+        if proposal.get("verify") == "deleted":
+            ok = all(r.get("ok") for r in results) and not Path(proposal.get("deleted_path", "")).exists()
+            return {"comparison": [{"metric": f"{Path(proposal['deleted_path']).name} on {Path(proposal['deleted_path']).parent.name}",
+                                    "before": "there", "after": "in the Recycle Bin" if ok else "still there"}],
+                    "fixed": ok, "note": "You can restore it from the Recycle Bin." if ok else
+                    f"It could not be deleted: {results[-1].get('error', 'unknown error')}"}
         if proposal.get("verify") in ("steps_ok", "install"):
             ok = len(results) == len(proposal["steps"]) and all(r.get("ok") for r in results)
             if proposal["verify"] == "steps_ok":

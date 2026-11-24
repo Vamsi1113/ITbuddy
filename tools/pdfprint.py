@@ -123,7 +123,28 @@ def _explicit_name(phrase: str) -> str:
     return name.split()[-1] if not m.group(1) and " " in name and name.split()[-1].count(".") else name
 
 
-def _score(path: Path, words: list[str]) -> float:
+# The words people use for a file's type -> its extensions ("the RAGAS pdf" means RAGAS.pdf, not RAGAS.txt).
+_TYPE_WORDS = {"pdf": {".pdf"}, "txt": {".txt"}, "text": {".txt"}, "notepad": {".txt"}, "word": {".doc", ".docx"},
+               "docx": {".docx"}, "excel": {".xls", ".xlsx", ".csv"}, "xlsx": {".xlsx"}, "sheet": {".xls", ".xlsx", ".csv"},
+               "csv": {".csv"}, "powerpoint": {".ppt", ".pptx"}, "ppt": {".ppt", ".pptx"}, "pptx": {".pptx"},
+               "slides": {".ppt", ".pptx"}, "image": {".png", ".jpg", ".jpeg", ".gif", ".bmp"},
+               "photo": {".png", ".jpg", ".jpeg", ".heic"}, "picture": {".png", ".jpg", ".jpeg", ".bmp"},
+               "png": {".png"}, "jpg": {".jpg", ".jpeg"}, "video": {".mp4", ".mov", ".avi", ".mkv"}, "mp4": {".mp4"},
+               "zip": {".zip"}}
+# Never offered for anything: programs, scripts, shortcuts and system files.
+_NEVER_TOUCH = {".exe", ".dll", ".sys", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".lnk", ".ini", ".reg", ".com", ".scr",
+                ".drv", ".ocx", ".cpl", ".inf"}
+
+
+def type_hint(phrase: str) -> set[str]:
+    """Extensions the user's words ask for ("the RAGAS pdf" -> {".pdf"}), or an empty set."""
+    out: set[str] = set()
+    for t in _tokens(phrase):
+        out |= _TYPE_WORDS.get(t, set())
+    return out
+
+
+def _score(path: Path, words: list[str], hint: set[str] | None = None) -> float:
     stem = _tokens(path.stem)
     if not stem or not words:
         return 0.0
@@ -131,15 +152,26 @@ def _score(path: Path, words: list[str]) -> float:
     word_cover = sum(1 for w in words if any(_word_match(s, w) for s in stem)) / len(words)
     whole_stem = stem_cover >= 0.99 and any(len(s) >= 3 for s in stem)      # every word of the name was said
     if whole_stem or (word_cover >= 0.99 and stem_cover >= 0.34):
-        return stem_cover + word_cover - 0.001 * len(stem) - (0.01 if path.suffix.lower() == ".pdf" else 0)
+        ext = path.suffix.lower()
+        bonus = 0.5 if hint and ext in hint else (-0.5 if hint else (-0.01 if ext == ".pdf" else 0))
+        return stem_cover + word_cover - 0.001 * len(stem) + bonus
     return 0.0
 
 
-def _ranked(phrase: str) -> list[tuple[float, Path]]:
-    """(score, path) for documents the words describe, best first. Looks in the usual folders first and only goes on
-    to the whole profile and the other drives when nothing matched there. Extra words, small typos and missing
-    extensions are fine: "the RAGAS document in my destop" finds RAGAS.txt; an exact file name always wins."""
-    words = [t for t in _tokens(phrase) if t not in _FILLER] or [t for t in _tokens(phrase) if len(t) > 2]
+def _allowed(path: Path, kinds: set[str] | None) -> bool:
+    ext = path.suffix.lower()
+    if ext in _NEVER_TOUCH or path.name.startswith(("~$", ".")):
+        return False
+    return kinds is None or ext in kinds
+
+
+def _ranked(phrase: str, kinds: set[str] | None = CONVERTIBLE | {".pdf"}) -> list[tuple[float, Path]]:
+    """(score, path) for files the words describe, best first. Looks in the usual folders first and only goes on to
+    the whole profile and the other drives when nothing matched there. Extra words, small typos and missing
+    extensions are fine: "the RAGAS document in my destop" finds RAGAS.txt; "the RAGAS pdf" prefers RAGAS.pdf; an
+    exact file name always wins. `kinds` limits the extensions (None = any file except programs and system files)."""
+    hint = type_hint(phrase)
+    words = [t for t in _tokens(phrase) if t not in _FILLER and t not in _TYPE_WORDS] or         [t for t in _tokens(phrase) if len(t) > 2 and t not in _TYPE_WORDS]
     names = [n.lower() for n in _explicit_names(phrase)]
     exact = names[0] if names else ""
     if exact:
@@ -161,26 +193,26 @@ def _ranked(phrase: str) -> list[tuple[float, Path]]:
             for f in files:
                 low = f.lower()
                 p = Path(root, f)
-                if p.suffix.lower() not in CONVERTIBLE | {".pdf"}:
+                if not _allowed(p, kinds):
                     continue
                 if names and low in names:
                     scored[p] = 10.0 - names.index(low) * 0.1          # the longest matching name wins
                     continue
-                sc = _score(p, words)
+                sc = _score(p, words, hint)
                 if sc:
                     scored[p] = max(scored.get(p, 0), sc)
     return sorted(((v, k) for k, v in scored.items()), key=lambda x: -x[0])
 
 
-def find_documents(phrase: str, limit: int = 5) -> list[Path]:
-    return [p for _, p in _ranked(phrase)[:limit]]
+def find_documents(phrase: str, limit: int = 5, kinds: set[str] | None = CONVERTIBLE | {".pdf"}) -> list[Path]:
+    return [p for _, p in _ranked(phrase, kinds)[:limit]]
 
 
-def _usable_path(text: str) -> Path | None:
-    """A full path to an existing document outside the system folders (Tobi's own plan passes these)."""
+def _usable_path(text: str, kinds: set[str] | None = CONVERTIBLE | {".pdf"}) -> Path | None:
+    """A full path to an existing file outside the system folders (Tobi's own plan passes these)."""
     try:
         p = Path(os.path.expandvars((text or "").strip().strip("\"'")))
-        if p.is_absolute() and p.is_file() and p.suffix.lower() in CONVERTIBLE | {".pdf"}:
+        if p.is_absolute() and p.is_file() and _allowed(p, kinds):
             if not any(part.lower() in _SKIP_DIRS for part in p.parts[1:-1]):
                 return p
     except (OSError, ValueError):
@@ -188,12 +220,12 @@ def _usable_path(text: str) -> Path | None:
     return None
 
 
-def resolve_document(phrase: str) -> Path | None:
-    """The one document the words mean, or None when nothing matches or two documents match about equally well."""
-    direct = _usable_path(phrase)
+def resolve_document(phrase: str, kinds: set[str] | None = CONVERTIBLE | {".pdf"}) -> Path | None:
+    """The one file the words mean, or None when nothing matches or two files match about equally well."""
+    direct = _usable_path(phrase, kinds)
     if direct:
         return direct
-    ranked = _ranked(phrase)
+    ranked = _ranked(phrase, kinds)
     if not ranked:
         return None
     if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.05 and ranked[0][1].stem.lower() != ranked[1][1].stem.lower():

@@ -269,6 +269,14 @@ and I'll get it done." The approval card leads with that one line (details are f
 ("Done! Saved RAGAS.txt as a PDF on your Desktop ✓"). A computer task that does not work is reported honestly with what to
 do instead; it no longer opens an IT ticket by itself.
 
+## Your files: delete, open
+
+"Delete the RAGAS pdf in my desktop" finds exactly that file (the type word picks RAGAS.pdf over RAGAS.txt), asks "Should I
+delete RAGAS.pdf from Desktop? It goes to the Recycle Bin, so you can get it back", and after OK moves it to the Recycle
+Bin. "Open the RAGAS pdf" opens it in its usual program. Same search as below; programs, shortcuts and system files are
+never touched, and "delete all my files" stays a job for IT. Small next steps (for example opening the printer settings
+after "is a printer connected?") are offered as a **Yes / No** question under a short answer.
+
 ## Save a document as a PDF (virtual printer)
 
 "Convert my itbuddy test note to a PDF using my printer", "save my report as PDF on the desktop" or even "print the RAGAS

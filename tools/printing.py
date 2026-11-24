@@ -179,8 +179,21 @@ _PRINT_PROBLEM = re.compile(
 
 def is_print_problem(text: str) -> bool:
     """Something is WRONG with printing (offline, stuck, will not print ...). Mentioning a printer is not a problem:
-    "which printer should I use" or "I want to use another ODC's printer" is a question about rules and access."""
-    return is_print_request(text) and bool(_PRINT_PROBLEM.search(text or ""))
+    "which printer should I use" or "I want to use another ODC's printer" is a question about rules and access, and
+    "is a printer connected or not" is a status question."""
+    cleaned = re.sub(r"(?<!\w)(?:or\s+not|whether)(?!\w)", " ", text or "", flags=re.IGNORECASE)
+    return is_print_request(cleaned) and bool(_PRINT_PROBLEM.search(cleaned))
+
+
+_PRINT_STATUS = re.compile(
+    r"(?<!\w)(?:printers?\b.{0,40}\b(?:connected|installed|attached|set\s*up|available|plugged|working|there|added)|"
+    r"(?:connected|installed|attached|available|any|have\s+(?:a|any))\s+(?:\w+\s+){0,3}printers?|"
+    r"do\s+i\s+have\s+(?:a|any)\s+printers?)(?!\w)", re.IGNORECASE)
+
+
+def is_print_status(text: str) -> bool:
+    """"Is a printer connected to my system?", "do I have a printer", "which printers are installed here"."""
+    return bool(_PRINT_STATUS.search(text or ""))
 
 
 def extract_file_name(text: str) -> str:

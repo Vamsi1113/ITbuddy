@@ -142,6 +142,14 @@
     const steps = (a.steps || []).map((s, i) => `<li>${esc(s)}</li>`).join('');
     const risk = ({ 1: 'Low-impact change', 2: 'Medium change, cannot be undone' })[a.risk] || 'Change';
     const say = a.say || `Shall I ${String(a.summary || 'go ahead').replace(/^./, (c) => c.toLowerCase())}?`;
+    if (a.style === 'offer') {                             // an answer plus a small "want me to ...?" with Yes / No
+      const r = addRow({ who: 'in', wide: true, cls: 'card-row offer', html:
+        `<div class="card">${a.diagnosis ? md(a.diagnosis) : ''}<p class="say">${esc(say)}</p>` +
+        `<div class="actions"><button class="btn go" data-act="1">Yes</button><button class="btn no" data-act="0">No</button></div></div>` });
+      r.querySelector('.bubble').classList.add('card');
+      r.dataset.task = e.task_id; r.dataset.offer = '1';
+      return;
+    }
     const row = addRow({ who: 'in', wide: true, cls: 'card-row', html:
       `<div class="card"><p class="say">${esc(say)}</p>` +
       (a.diagnosis ? `<div class="finding">${md(a.diagnosis)}</div>` : '') +
@@ -159,7 +167,8 @@
     const approved = btn.dataset.act === '1';
     const box = row.querySelector('.actions');
     const hint = row.querySelector('.hint'); if (hint) hint.remove();
-    box.outerHTML = `<div class="decided">${approved ? '✓ You said OK' : '✕ Not now'}</div>`;
+    const offer = row.dataset.offer === '1';
+    box.outerHTML = `<div class="decided">${approved ? (offer ? '✓ Yes' : '✓ You said OK') : (offer ? '✕ No' : '✕ Not now')}</div>`;
     state.busy = true; state.steps = state.steps.slice(); setBusy(true);
     typingOn(approved ? 'working on it' : '');
     const r = await call('resume', row.dataset.task, approved);

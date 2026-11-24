@@ -169,10 +169,11 @@ def test_whole_graph_answers_from_the_rules_without_asking_for_approval(monkeypa
     assert any(l.startswith("**Rule:** Office A printers are for that ODC") for l in state["basis"])
 
 
-# --- troubleshooting no longer asks approval just to open Settings -------------------------------
-def test_no_printer_installed_gives_advice_not_an_approval_card():
+# --- no printer: a short answer and a yes / no offer, not a big approval card ---------------------
+def test_no_printer_installed_gives_a_short_answer_and_a_yes_no_offer():
     state = {"printers": [{"Name": "Microsoft Print to PDF", "PortName": "PORTPROMPT:"}], "spooler": "Running", "jobs": [], "ports": [],
              "events": [], "admin": False}
     proposal = specialists.print_proposal({"findings": printing.analyse(state), "state": state, "file_name": ""})
-    assert proposal["fix"] is None and not proposal.get("steps")
-    assert "Add device" in proposal["diagnosis"] and "open the printer settings" in proposal["diagnosis"]
+    assert proposal["offer"] is True and proposal["ask"] == "Want me to open the printer settings so you can add one?"
+    assert proposal["diagnosis"].startswith("No printer is connected to this computer right now")
+    assert len(proposal["diagnosis"]) < 300 and "What you need to do" not in proposal["diagnosis"]

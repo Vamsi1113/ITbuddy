@@ -137,7 +137,8 @@ def route_node(state: State) -> dict:
         choice = router.route(request)
     except ModelError as e:
         return {**base, "agent": "none", "outcome": "error", "error": str(e)}
-    if choice["agent"] == "devices" and printing.is_print_request(request) and not printing.is_print_problem(request):
+    if (choice["agent"] == "devices" and printing.is_print_request(request) and not printing.is_print_problem(request)
+            and not printing.is_print_status(request)):
         choice = {"agent": "workplace", "question": ""}         # nothing is broken: do not troubleshoot, answer from the rules
     audit.log_event(task_id, "route", agent=choice["agent"], detail=choice)
     if choice["agent"] == "none":
@@ -170,7 +171,7 @@ def diagnose_node(state: State) -> dict:
             return _diagnose_computer_use(state)
         if agent == "it_request":
             return _service_desk(state)
-        if agent == "devices" and printing.is_print_problem(state["request"]):
+        if agent == "devices" and (printing.is_print_problem(state["request"]) or printing.is_print_status(state["request"])):
             return _diagnose_printing(state)
         return _diagnose(state, DOMAINS[agent])
     except (ModelError, PolicyError) as e:
@@ -282,6 +283,12 @@ def _diagnose_computer_use(state: State) -> dict:
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_write_note(choice)}
         if choice["task"] == "open_folder":
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_folder(choice["folder"])}
+        if choice["task"] == "open_file":
+            proposal = COMPUTER_USE.plan_open_file(choice)
+            return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
+        if choice["task"] == "delete_file":
+            proposal = COMPUTER_USE.plan_delete_file(choice)
+            return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
         if choice["task"] == "save_as_pdf":
             proposal = COMPUTER_USE.plan_save_as_pdf(choice)
             return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
@@ -338,7 +345,8 @@ def approval_node(state: State) -> dict:
     proposal = state["proposal"]
     answer = interrupt({
         "agent": LABELS[state["agent"]],
-        "say": voice.offer(proposal["summary"]),
+        "say": proposal.get("ask") or voice.offer(proposal["summary"]),
+        "style": "offer" if proposal.get("offer") else "action",
         "diagnosis": proposal["diagnosis"],
         "summary": proposal["summary"],
         "what_changes": proposal["what_changes"],
@@ -376,6 +384,9 @@ def execute_node(state: State) -> dict:
 
 def verify_node(state: State) -> dict:
     agent = state["agent"]
+    if (state.get("proposal") or {}).get("offer"):          # a small extra the user said yes to: no re-check needed
+        ok = all(r.get("ok") is not False for r in state.get("fix_results", []))
+        return {"comparison": [], "verify_note": "", "outcome": "fixed" if ok else "not_fixed"}
     _emit(agent, "Checking the result: running the checks again")
     runner = _runner(state)
     try:
@@ -436,7 +447,10 @@ def report_node(state: State) -> dict:
     elif outcome == "error":
         parts.append(f"I had to stop: {state.get('error')} Nothing was changed.")
     else:
-        if outcome == "rejected":
+        if outcome == "rejected" and proposal.get("offer"):
+            parts.append("No problem! Just ask if you need anything else.")
+            outcome = "chat"                          # a "no thanks" to a small offer: a plain reply, no status badge
+        elif outcome == "rejected":
             parts.append(voice.declined() + " " + _alternatives(agent))
         elif outcome in ("fixed", "not_fixed"):
             # the diagnosis was already on the approval card: now just say what happened, like a person would
@@ -446,7 +460,8 @@ def report_node(state: State) -> dict:
             else:
                 why = (failed[0].get("error") or failed[0].get("output")) if failed else state.get("verify_note")
                 parts.append(voice.failed(proposal.get("summary", ""), str(why or "")))
-                parts.append(_ticket_line(ticket))
+                if ticket:
+                    parts.append(_ticket_line(ticket))
         else:
             parts.append(proposal.get("diagnosis", ""))
     if state.get("secret_found"):
