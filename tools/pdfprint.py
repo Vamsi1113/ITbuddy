@@ -46,8 +46,19 @@ _IMAGE_SCRIPT = (
 
 
 # ------------------------------------------------------------------------------------------------ finding the file
-_FILLER = {"my", "the", "a", "an", "this", "that", "file", "document", "documnet", "doc", "documents", "please", "pls", "called",
-           "named", "of", "in", "on", "to", "into", "at"}
+# Words that describe WHERE or WHAT, not the file's name ("the RAGAS document there in my destop" -> "ragas").
+_FILLER = {"my", "the", "a", "an", "this", "that", "these", "those", "it", "its", "file", "files", "document", "documents",
+           "documnet", "doc", "docs", "please", "pls", "called", "named", "of", "in", "on", "to", "into", "at", "from", "there",
+           "here", "which", "is", "are", "was", "and", "or", "with", "using", "use", "via", "by", "for", "me", "u", "you",
+           "can", "could", "would", "will", "print", "printer", "printers", "printing", "service", "save", "saved", "store",
+           "convert", "export", "make", "pdf", "copy", "desktop", "destop", "deskop", "dekstop", "downloads", "download",
+           "folder", "folders", "drive", "drives", "virtual", "avd", "system", "computer", "pc", "laptop", "find", "will",
+           "should", "as", "into", "then", "also", "be", "need", "want", "wanna", "ok", "okay", "no", "yes"}
+# Never searched: Windows itself, installed programs, app data, caches, source control and package folders.
+_SKIP_DIRS = {"windows", "program files", "program files (x86)", "programdata", "appdata", "$recycle.bin",
+              "system volume information", "recovery", "perflogs", "msocache", "node_modules", ".git", ".venv", "venv",
+              "__pycache__", "site-packages", ".cache", "temp", "tmp", "onedrivetemp", "intel", "nvidia", "amd", "drivers"}
+SEARCH_SECONDS = 8.0
 
 
 def _tokens(text: str) -> list[str]:
@@ -68,33 +79,96 @@ def folder_path(name: str) -> Path:
     return known_folder(name if name in FOLDERS else "Desktop")
 
 
-def _ranked(phrase: str) -> list[tuple[float, Path]]:
-    """(score, path) for documents in Desktop / Documents / Downloads (two levels deep) that the words describe, best
-    first. "my itbuddy test note" finds "itbuddy test note.txt"; small typos are tolerated; an exact name wins."""
-    words = [t for t in _tokens(phrase) if t not in _FILLER] or _tokens(phrase)
-    if not words:
+def _search_roots() -> list[tuple[Path, int]]:
+    """Where to look, nearest first, with how deep: the usual folders, then the whole user profile, then the other
+    local drives (D:, E: ...). System and program folders are never searched."""
+    roots: list[tuple[Path, int]] = [(f, 2) for f in _folders()]
+    home = Path(os.path.expanduser("~"))
+    roots.append((home, 5))
+    try:
+        import psutil
+        for part in psutil.disk_partitions(all=False):
+            mount = Path(part.mountpoint)
+            if "fixed" in (part.opts or "").lower() or part.fstype:
+                if mount.drive.upper() != home.drive.upper():
+                    roots.append((mount, 4))
+    except Exception:
+        pass
+    seen, out = set(), []
+    for r, d in roots:
+        key = str(r).lower()
+        if key not in seen and r.exists():
+            seen.add(key)
+            out.append((r, d))
+    return out
+
+
+def _explicit_names(phrase: str) -> list[str]:
+    """Possible file names in the words, longest first: "print my Q3 report.docx" -> ["my Q3 report.docx",
+    "Q3 report.docx", "report.docx"] (the search tries each; a sentence often carries extra leading words)."""
+    m = re.search(r"[\"']([^\"']{1,120}\.[A-Za-z0-9]{2,5})[\"']|([\w\-. ()]{1,120}\.[A-Za-z0-9]{2,5})(?![\w.])", phrase or "")
+    name = (m.group(1) or m.group(2)).strip() if m else ""
+    if not name:
         return []
-    exact = Path(phrase.strip().strip("\"'")).name.lower()
+    words = Path(name).name.split()
+    return [" ".join(words[i:]) for i in range(len(words))]
+
+
+def _explicit_name(phrase: str) -> str:
+    """A real file name in the words ("RAGAS.txt", "\"Q3 report.docx\""), lowercase, or ""."""
+    m = re.search(r"[\"']([^\"']{1,120}\.[A-Za-z0-9]{2,5})[\"']|([\w\-. ()]{1,120}\.[A-Za-z0-9]{2,5})(?![\w.])", phrase or "")
+    if not m:
+        return ""
+    name = (m.group(1) or m.group(2)).strip()
+    return name.split()[-1] if not m.group(1) and " " in name and name.split()[-1].count(".") else name
+
+
+def _score(path: Path, words: list[str]) -> float:
+    stem = _tokens(path.stem)
+    if not stem or not words:
+        return 0.0
+    stem_cover = sum(1 for s in stem if any(_word_match(s, w) for w in words)) / len(stem)
+    word_cover = sum(1 for w in words if any(_word_match(s, w) for s in stem)) / len(words)
+    whole_stem = stem_cover >= 0.99 and any(len(s) >= 3 for s in stem)      # every word of the name was said
+    if whole_stem or (word_cover >= 0.99 and stem_cover >= 0.34):
+        return stem_cover + word_cover - 0.001 * len(stem) - (0.01 if path.suffix.lower() == ".pdf" else 0)
+    return 0.0
+
+
+def _ranked(phrase: str) -> list[tuple[float, Path]]:
+    """(score, path) for documents the words describe, best first. Looks in the usual folders first and only goes on
+    to the whole profile and the other drives when nothing matched there. Extra words, small typos and missing
+    extensions are fine: "the RAGAS document in my destop" finds RAGAS.txt; an exact file name always wins."""
+    words = [t for t in _tokens(phrase) if t not in _FILLER] or [t for t in _tokens(phrase) if len(t) > 2]
+    names = [n.lower() for n in _explicit_names(phrase)]
+    exact = names[0] if names else ""
+    if exact:
+        words = [t for t in _tokens(Path(exact).stem) if t not in _FILLER] or words
+    if not words and not exact:
+        return []
+    deadline = time.monotonic() + SEARCH_SECONDS
     scored: dict[Path, float] = {}
-    for base in _folders():
+    for tier, (base, max_depth) in enumerate(_search_roots()):
+        if scored and tier >= len(_folders()):
+            break                                        # found in a nearer place: do not search further
         depth = len(base.parts)
         for root, dirs, files in os.walk(base):
-            if len(Path(root).parts) - depth >= 2:
+            if time.monotonic() > deadline:
+                break
+            if len(Path(root).parts) - depth >= max_depth:
                 dirs[:] = []
+            dirs[:] = [d for d in dirs if d.lower() not in _SKIP_DIRS and not d.startswith((".", "$", "~"))]
             for f in files:
+                low = f.lower()
                 p = Path(root, f)
                 if p.suffix.lower() not in CONVERTIBLE | {".pdf"}:
                     continue
-                if f.lower() == exact:
-                    scored[p] = 10.0
+                if names and low in names:
+                    scored[p] = 10.0 - names.index(low) * 0.1          # the longest matching name wins
                     continue
-                stem = _tokens(p.stem)
-                if not stem:
-                    continue
-                stem_cover = sum(1 for s in stem if any(_word_match(s, w) for w in words)) / len(stem)
-                word_cover = sum(1 for w in words if any(_word_match(s, w) for s in stem)) / len(words)
-                if (stem_cover >= 0.99 and word_cover >= 0.5) or (word_cover >= 0.99 and stem_cover >= 0.34):
-                    scored[p] = stem_cover + word_cover - 0.001 * len(stem) - (0.01 if p.suffix.lower() == ".pdf" else 0)   # the original first
+                sc = _score(p, words)
+                if sc:
+                    scored[p] = max(scored.get(p, 0), sc)
     return sorted(((v, k) for k, v in scored.items()), key=lambda x: -x[0])
 
 
@@ -102,8 +176,23 @@ def find_documents(phrase: str, limit: int = 5) -> list[Path]:
     return [p for _, p in _ranked(phrase)[:limit]]
 
 
+def _usable_path(text: str) -> Path | None:
+    """A full path to an existing document outside the system folders (Tobi's own plan passes these)."""
+    try:
+        p = Path(os.path.expandvars((text or "").strip().strip("\"'")))
+        if p.is_absolute() and p.is_file() and p.suffix.lower() in CONVERTIBLE | {".pdf"}:
+            if not any(part.lower() in _SKIP_DIRS for part in p.parts[1:-1]):
+                return p
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def resolve_document(phrase: str) -> Path | None:
     """The one document the words mean, or None when nothing matches or two documents match about equally well."""
+    direct = _usable_path(phrase)
+    if direct:
+        return direct
     ranked = _ranked(phrase)
     if not ranked:
         return None
@@ -119,6 +208,22 @@ def pdf_printer_installed() -> bool:
         return any(PDF_PRINTER.lower() in str(p.get("Name", "")).lower() for p in printing.collect_state()["printers"])
     except Exception:
         return False
+
+
+def _stop(proc, dlg: int = 0) -> None:
+    """Cancel the print to the PDF printer: close its Save window and end the helper process Tobi started."""
+    try:
+        if dlg:
+            import win32con
+            import win32gui
+            win32gui.PostMessage(dlg, win32con.WM_COMMAND, 2, 0)          # 2 = IDCANCEL
+    except Exception:
+        pass
+    try:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+    except Exception:
+        pass
 
 
 def _launch(source: Path) -> subprocess.Popen | None:
@@ -162,9 +267,18 @@ def _fill_save_window(dlg: int, target: Path) -> None:
     """Put the new file's path in the 'File name' box and press Save, by sending the window its own messages."""
     import win32con
     import win32gui
-    kids = []
-    win32gui.EnumChildWindows(dlg, lambda h, _: kids.append((h, win32gui.GetClassName(h), win32gui.GetDlgCtrlID(h))) or True, None)
-    edit = next((h for h, cls, cid in kids if cls == "Edit" and cid == 1001), None) or         next((h for h, cls, cid in kids if cls == "Edit"), None)
+    edit = None
+    end = time.monotonic() + 8                      # the window is shown before its boxes are built: wait for them
+    while edit is None and time.monotonic() < end:
+        kids = []
+        try:
+            win32gui.EnumChildWindows(dlg, lambda h, _: kids.append((h, win32gui.GetClassName(h), win32gui.GetDlgCtrlID(h))) or True,
+                                      None)
+        except Exception:
+            pass
+        edit = next((h for h, cls, cid in kids if cls == "Edit" and cid == 1001), None)
+        if edit is None:
+            time.sleep(0.3)
     if edit is None:
         raise RuntimeError("could not find the 'File name' box in the Save window")
     win32gui.SendMessage(edit, win32con.WM_SETTEXT, 0, str(target))
@@ -174,7 +288,7 @@ def _fill_save_window(dlg: int, target: Path) -> None:
 
 @tool("computer_use", R1, "Save a document (text, Word, Excel, PowerPoint, picture) as a PDF with Windows' virtual PDF "
       "printer, in Desktop, Documents or Downloads. Nothing is printed on paper and the original is not changed.",
-      params=(Param("file", "str", "the document: its name, or the words the user used for it", max_len=200),
+      params=(Param("file", "str", "the document: its name, its full path, or the words the user used for it", max_len=400),
               Param("name", "str", "name of the new PDF without a folder, optional", required=False, max_len=80),
               Param("folder", "str", "where to save the PDF", choices=FOLDERS, required=False)),
       change_note="Windows' virtual printer \"Microsoft Print to PDF\" makes a new PDF of the document. Nothing is printed on "
@@ -208,6 +322,7 @@ def save_as_pdf(file: str, name: str = "", folder: str = "") -> dict:
     try:
         _fill_save_window(dlg, target)
     except Exception as e:
+        _stop(proc, dlg)
         return {"ok": False, "error": f"The Save window could not be filled in: {str(e)[:150]}"}
     end = time.monotonic() + 40
     last = -1

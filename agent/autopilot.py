@@ -199,8 +199,10 @@ def approval_node(state: dict) -> dict:
     p = state["auto_pending"]
     summary, changes = describe(p["tool"], p["args"])
     _emit(f"Waiting for your approval: {summary}", p["tool"])
+    from agent import voice
     answer = interrupt({
-        "agent": "Autopilot", "diagnosis": p.get("thought") or "Autopilot wants to take this step.",
+        "agent": "Autopilot", "say": voice.offer(summary),
+        "diagnosis": p.get("thought") or "Autopilot wants to take this step.",
         "summary": summary, "what_changes": changes, "risk": p["risk"], "steps": [summary],
     })
     approved = bool(answer.get("approved")) if isinstance(answer, dict) else bool(answer)

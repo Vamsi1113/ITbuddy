@@ -141,12 +141,15 @@
     const a = e.approval || {};
     const steps = (a.steps || []).map((s, i) => `<li>${esc(s)}</li>`).join('');
     const risk = ({ 1: 'Low-impact change', 2: 'Medium change, cannot be undone' })[a.risk] || 'Change';
+    const say = a.say || `Shall I ${String(a.summary || 'go ahead').replace(/^./, (c) => c.toLowerCase())}?`;
     const row = addRow({ who: 'in', wide: true, cls: 'card-row', html:
-      `<div class="card"><span class="risk">${esc(risk)}</span><h4>${esc(a.summary || 'Approval needed')}</h4>` +
-      (a.diagnosis ? md(a.diagnosis) : '') +
+      `<div class="card"><p class="say">${esc(say)}</p>` +
+      (a.diagnosis ? `<div class="finding">${md(a.diagnosis)}</div>` : '') +
+      `<details class="more"><summary>Details</summary><span class="risk">${esc(risk)}</span>` +
       `<div class="lbl">What will change</div>${md(a.what_changes || '')}` +
-      (steps ? `<div class="lbl">Planned steps</div><ol>${steps}</ol>` : '') +
-      `<div class="actions"><button class="btn go" data-act="1">Approve</button><button class="btn no" data-act="0">Reject</button></div></div>` });
+      (steps ? `<div class="lbl">Steps</div><ol>${steps}</ol>` : '') + `</details>` +
+      `<div class="actions"><button class="btn go" data-act="1">OK, do it</button><button class="btn no" data-act="0">Not now</button></div>` +
+      `<div class="hint">or just type "ok" or "no"</div></div>` });
     row.querySelector('.bubble').classList.add('card');
     row.dataset.task = e.task_id;
   }
@@ -155,7 +158,8 @@
     const row = btn.closest('.row');
     const approved = btn.dataset.act === '1';
     const box = row.querySelector('.actions');
-    box.outerHTML = `<div class="decided">${approved ? '✓ Approved' : '✕ Rejected'}</div>`;
+    const hint = row.querySelector('.hint'); if (hint) hint.remove();
+    box.outerHTML = `<div class="decided">${approved ? '✓ You said OK' : '✕ Not now'}</div>`;
     state.busy = true; state.steps = state.steps.slice(); setBusy(true);
     typingOn(approved ? 'working on it' : '');
     const r = await call('resume', row.dataset.task, approved);
@@ -225,9 +229,23 @@
   const input = $('#input'), sendBtn = $('#send');
   function setBusy(b) { state.busy = b; sendBtn.disabled = b || !input.value.trim(); input.placeholder = b ? 'Tobi is working…' : 'Message Tobi'; }
   function autosize() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 110) + 'px'; sendBtn.disabled = state.busy || !input.value.trim(); }
+  const YES = /^\s*(ok(ay)?|k|yes|yeah|yep|yup|sure|go\s*ahead|continue|proceed|do\s*it|approve[d]?|fine|alright|all\s*right|please\s*do|go)\b[\s.!]*$/i;
+  const NO = /^\s*(no|nope|nah|cancel|stop|don'?t|do\s*not|not\s*now|reject|leave\s*it|skip)\b[\s.!]*$/i;
+
+  function openCard() {
+    const cards = [...stream.querySelectorAll('.row.card-row')].filter((r) => r.querySelector('.actions [data-act]'));
+    return cards.length ? cards[cards.length - 1] : null;
+  }
+
   async function submit(text) {
     text = (text || input.value).trim();
     if (!text || state.busy) return;
+    const card = openCard();
+    if (card && (YES.test(text) || NO.test(text))) {       // "ok" / "go ahead" / "no" answers the open approval card
+      input.value = ''; autosize();
+      addRow({ who: 'out', html: md(text) });
+      return decide(card.querySelector(`[data-act="${YES.test(text) ? 1 : 0}"]`));
+    }
     input.value = ''; autosize();
     $('#suggest').innerHTML = '';
     state.userMsgs++;

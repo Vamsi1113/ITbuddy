@@ -261,11 +261,21 @@ Tobi works out where the user is, then applies THAT ODC's rules (`organisation` 
   "raise it" and give a reason and Tobi raises the access request (a ticket with your ODC, floor, seat and reason) after
   you approve it.
 
+## How Tobi talks
+
+Tobi answers like an assistant that gets on with the job: "Sure, I'll save RAGAS.txt as a PDF on your Desktop. Just say OK
+and I'll get it done." The approval card leads with that one line (details are folded away), the buttons are **OK, do it** /
+**Not now**, and you can simply type "ok", "go ahead" or "no" instead of clicking. When it is done it says so plainly
+("Done! Saved RAGAS.txt as a PDF on your Desktop ✓"). A computer task that does not work is reported honestly with what to
+do instead; it no longer opens an IT ticket by itself.
+
 ## Save a document as a PDF (virtual printer)
 
-"Convert my itbuddy test note to a PDF using my printer" (or "save my report as PDF on the desktop") makes Tobi do what
-a user does by hand with **Microsoft Print to PDF**: it finds the document from the words you used (Desktop, Documents and
-Downloads, typos tolerated; it asks if two documents match), sends it to the virtual printer, types the new file's name
+"Convert my itbuddy test note to a PDF using my printer", "save my report as PDF on the desktop" or even "print the RAGAS
+document using my printer service and save it in desktop" makes Tobi do what a user does by hand with **Microsoft Print to
+PDF**: it finds the document from the words you used (typos and extra words tolerated; it looks in Desktop, Documents and
+Downloads first, then your whole profile, then your other drives, never in Windows or program folders; it asks only if two
+documents match equally), sends it to the virtual printer, types the new file's name
 in the "Save Print Output As" window and presses Save, then checks the PDF exists. It needs approval, prints nothing on
 paper, never overwrites (an existing name becomes `name (2).pdf`) and never changes the original. Text files, pictures and
 Word / Excel / PowerPoint documents are supported; a file that is already a PDF is left alone.

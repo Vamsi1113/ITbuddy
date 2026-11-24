@@ -845,7 +845,7 @@ class ComputerUse:
     def _whole_word(word: str, text: str) -> bool:
         return re.search(r"(?<![\w+])" + re.escape(word) + r"(?![\w+])", text, re.IGNORECASE) is not None
 
-    _PDF_WORD = re.compile(r"(?<!\w)pdf(?!\w)", re.IGNORECASE)
+    _PDF_WORD = re.compile(r"(?<![\w.])pdf(?!\w)", re.IGNORECASE)      # the word "pdf", not a file's ".pdf" ending
     _PDF_VERB = re.compile(r"(?<!\w)(convert|save|export|print|turn|make|create|change|write)(?!\w)", re.IGNORECASE)
     _PDF_WHAT = re.compile(
         r"(?<!\w)(?:convert|save|export|print|turn|make|create|change|write)(?!\w)\s+(?:me\s+)?(?:a\s+(?:copy|pdf)\s+of\s+)?"
@@ -855,28 +855,63 @@ class ComputerUse:
     _PDF_CUT = re.compile(r"(?<!\w)(by|using|with|via|through|on\s+my\s+printer|from\s+my\s+printer)(?!\w).*$", re.IGNORECASE | re.DOTALL)
     _PDF_WHERE = re.compile(r"(?<!\w)(?:in|on|to|into|at|under)\s+(?:my\s+|the\s+)?(desktop|documents|downloads)(?!\w)", re.IGNORECASE)
 
+    _SAVE_TO = re.compile(r"(?<!\w)(?:save|store|keep|put|place)\w*\s+(?:it|that|this|them|the\s+\w+|a\s+copy)?\s*"
+                          r"(?:as\s+(?:a\s+)?\w+\s+)?(?:in|on|to|into|at|under)\s+(?:my\s+|the\s+)?(?P<place>[\w-]+)", re.IGNORECASE)
+    _VIRTUAL_PRINTER = re.compile(r"(?<!\w)(?:print(?:er|ing)?\s+(?:service|option|to\s+(?:a\s+)?file)|virtual\s+printer|"
+                                  r"microsoft\s+print|print\s+to\s+pdf)(?!\w)", re.IGNORECASE)
+    _ANY_PLACE = re.compile(r"(?<!\w)(?:in|on|to|into|at|under|from)\s+(?:my\s+|the\s+)?(?P<place>[\w-]+)", re.IGNORECASE)
+    _DOC_WORD = re.compile(r"(?<!\w)(file|document|documnet|doc|note|report|txt|word|excel|sheet|picture|photo|image)(?!\w)|"
+                           r"\.[A-Za-z0-9]{2,5}(?![\w.])", re.IGNORECASE)
+
+    @staticmethod
+    def _place(word: str) -> str:
+        """'destop' -> 'Desktop', 'documnets' -> 'Documents', anything else -> ''."""
+        import difflib
+        w = (word or "").lower()
+        best = max(("desktop", "documents", "downloads"), key=lambda f: difflib.SequenceMatcher(None, w, f).ratio())
+        return best.title() if difflib.SequenceMatcher(None, w, best).ratio() >= 0.75 else ""
+
     def _pdf_pick(self, text: str) -> dict | None:
-        """"convert my itbuddy test note to a pdf" / "save my report as pdf on the desktop" -> save_as_pdf."""
-        if not self._PDF_WORD.search(text) or self._PDF_HOW.search(text):
+        """Turn a document into a PDF with the virtual printer. Recognises "convert my itbuddy test note to a pdf",
+        "save my report as pdf on the desktop", and also requests with no word "pdf" in them such as "print the RAGAS
+        document using my printer service and save it in desktop" (printing INTO a folder means a PDF file)."""
+        if self._PDF_HOW.search(text):
             return None
-        m = self._PDF_WHAT.search(text) or self._PDF_OF.search(text)
-        if not m:
+        has_pdf = bool(self._PDF_WORD.search(text))
+        save_to = self._SAVE_TO.search(text)
+        save_place = self._place(save_to.group("place")) if save_to else ""
+        into_file = bool(save_place) and re.search(r"(?<!\w)print\w*(?!\w)", text, re.IGNORECASE)
+        if not (has_pdf or into_file or self._VIRTUAL_PRINTER.search(text)):
             return None
-        what = m.group("what")
-        folder = ""
-        where = self._PDF_WHERE.search(text)
-        if where:
-            folder = where.group(1).title()
-            what = self._PDF_WHERE.sub(" ", what)
-        what = self._PDF_CUT.sub("", what)
-        words = [w for w in re.split(r"\s+", what.strip(" .,!?'\"")) if w]
-        generic = {"my", "the", "a", "an", "this", "that", "file", "document", "documnet", "doc", "please", "pls", "called", "named"}
-        while words and words[0].lower() in generic:
-            words.pop(0)
-        while words and words[-1].lower() in {"file", "document", "documnet", "doc"}:
-            words.pop()
-        phrase = " ".join(words).strip()
-        if not phrase or len(phrase) > 120:
+        if not (has_pdf or self._DOC_WORD.search(text)):
+            return None
+        folder = save_place
+        if not folder:
+            where = self._PDF_WHERE.search(text)
+            folder = where.group(1).title() if where else ""
+        phrase = ""
+        m = (self._PDF_WHAT.search(text) or self._PDF_OF.search(text)) if has_pdf else None
+        if m:
+            what = self._PDF_WHERE.sub(" ", m.group("what"))
+            what = self._PDF_CUT.sub("", what)
+            words = [w for w in re.split(r"\s+", what.strip(" .,!?'\"")) if w]
+            generic = {"my", "the", "a", "an", "this", "that", "file", "document", "documnet", "doc", "please", "pls", "called", "named"}
+            while words and words[0].lower() in generic:
+                words.pop(0)
+            while words and words[-1].lower() in {"file", "document", "documnet", "doc"}:
+                words.pop()
+            phrase = " ".join(words).strip()
+        if not phrase or len(phrase) > 120 or any(self._place(w) for w in phrase.split()[-1:]):
+            # no clean "X to pdf" phrase: keep the words that can be part of a file name (the search ignores the rest)
+            from tools.pdfprint import _FILLER, _explicit_name
+            explicit = _explicit_name(text)
+            if explicit:
+                phrase = explicit
+            else:
+                tokens = [t for t in re.split(r"[^\w.-]+", text) if t and t.lower() not in _FILLER and not self._place(t)
+                          and len(t) > 1]
+                phrase = " ".join(tokens[:6])
+        if not phrase:
             return None
         return {"task": "save_as_pdf", "file": phrase, "folder": folder, "reason": ""}
 
@@ -1054,9 +1089,9 @@ class ComputerUse:
         if source is None:
             if found:
                 names = ", ".join(p.name for p in found)
-                return say(f"I found more than one document that could be '{phrase}': {names}. Tell me which one to save as a PDF.")
-            return say(f"I could not find a document called '{phrase}' in your Desktop, Documents or Downloads folder. "
-                       "Tell me its exact name, or put it in one of those folders.")
+                return say(f"I found a few files that could be '{phrase}': {names}. Which one should I turn into a PDF?")
+            return say(f"I looked through your folders and drives but couldn't find anything called '{phrase}'. "
+                       "What's the file called? Even part of the name is enough.")
         ext = source.suffix.lower()
         if ext == ".pdf":
             return say(f"{source.name} is already a PDF, so there is nothing to convert.")
@@ -1071,14 +1106,13 @@ class ComputerUse:
         target = pdfprint.free_path(pdfprint.folder_path(dest_name), pdfprint.safe_filename(source.stem, source.stem, "pdf"))
         label = f"Save {source.name} as {target.name} in {dest_name}"
         return {
-            "diagnosis": (f"I found your document {source.name}. Windows' virtual printer \"Microsoft Print to PDF\" can turn "
-                          f"it into a PDF named {target.name} in your {dest_name} folder."),
+            "diagnosis": (f"Found it: {source.name} ({source.parent}). I'll print it with Windows' virtual printer "
+                          f"\"Microsoft Print to PDF\" and save it as {target.name} in {dest_name}."),
             "fix": "computer_use_task", "reason": "", "risk": policy.R1,
             "summary": f"Save {source.name} as a PDF in {dest_name}",
             "what_changes": (f"The file {source.name} is sent to the virtual printer \"Microsoft Print to PDF\" (nothing is printed "
                              f"on paper) and saved as {target} . Your original file is not changed."),
-            "steps": [{"tool": "save_as_pdf", "args": {"file": source.name if len(pdfprint.find_documents(source.name, 2)) == 1
-                                                      else str(source), "name": target.stem, "folder": dest_name},
+            "steps": [{"tool": "save_as_pdf", "args": {"file": str(source), "name": target.stem, "folder": dest_name},
                        "domain": "computer_use", "label": label}],
             "expected_file": str(target), "verify": "file",
         }

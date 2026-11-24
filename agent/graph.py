@@ -13,7 +13,7 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from agent import autopilot, basis, live, memory, router, specialists
+from agent import autopilot, basis, live, memory, router, specialists, voice
 from agent.llm import ModelError
 from agent.specialists import COMPUTER_USE, DOMAINS, LABELS
 from appconfig import cfg, data_path
@@ -338,6 +338,7 @@ def approval_node(state: State) -> dict:
     proposal = state["proposal"]
     answer = interrupt({
         "agent": LABELS[state["agent"]],
+        "say": voice.offer(proposal["summary"]),
         "diagnosis": proposal["diagnosis"],
         "summary": proposal["summary"],
         "what_changes": proposal["what_changes"],
@@ -388,7 +389,7 @@ def verify_node(state: State) -> dict:
     audit.log_event(state["task_id"], "result", agent=agent, detail=v)
     out = {"comparison": v["comparison"], "verify_note": v["note"],
            "outcome": "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
-    if not v["fixed"]:
+    if not v["fixed"] and agent != "computer_use":       # a computer task that did not work is not an IT incident
         merged = {**state, **out}
         out["ticket"] = _open_ticket(merged, state["request"][:100],
                                      f"{state['request']}\n\nTobi tried: {state['proposal'].get('summary')}. "
@@ -435,20 +436,19 @@ def report_node(state: State) -> dict:
     elif outcome == "error":
         parts.append(f"I had to stop: {state.get('error')} Nothing was changed.")
     else:
-        parts.append(proposal.get("diagnosis", ""))
         if outcome == "rejected":
-            parts.append(f"You rejected the change ({proposal.get('summary')}), so nothing was changed. "
-                         + _alternatives(agent))
+            parts.append(voice.declined() + " " + _alternatives(agent))
         elif outcome in ("fixed", "not_fixed"):
+            # the diagnosis was already on the approval card: now just say what happened, like a person would
             failed = [r for r in state.get("fix_results", []) if r.get("ok") is False]
-            parts.append(f"Action taken: {proposal.get('summary')}.")
-            if failed:
-                parts.append(f"A step failed: {failed[0].get('error') or failed[0].get('output')}")
             if outcome == "fixed":
-                parts.append(f"Verified: {state.get('verify_note')}")
+                parts.append(voice.done(proposal.get("summary", ""), state.get("verify_note", "")))
             else:
-                parts.append(f"The problem remains: {state.get('verify_note')} I will not retry.")
+                why = (failed[0].get("error") or failed[0].get("output")) if failed else state.get("verify_note")
+                parts.append(voice.failed(proposal.get("summary", ""), str(why or "")))
                 parts.append(_ticket_line(ticket))
+        else:
+            parts.append(proposal.get("diagnosis", ""))
     if state.get("secret_found"):
         parts.append("⚠️ Your message contained what looks like a password or key. I removed it before reading "
                      "or logging the message. Never share passwords in chat; if it was real, change it now.")
