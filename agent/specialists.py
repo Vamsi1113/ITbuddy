@@ -266,11 +266,12 @@ def _describe(tool: str, args: dict, diagnostics: dict) -> tuple[str, str]:
     if tool == "clean_approved_temp_files":
         temp = _first(diagnostics, "find_large_temp_folders")
         folders = ", ".join(f["folder"] for f in temp.get("folders", [])) or "the allowed temp folders"
-        mb = temp.get("total_cleanable_mb", "?")
+        mb = temp.get("total_cleanable_mb")
         age = cfg("storage", "min_file_age_minutes", default=60)
-        return (f"Delete temporary files (about {mb} MB)",
-                f"Temporary files older than {age} minutes will be deleted from: {folders}. About {mb} MB. "
-                + spec.change_note)
+        size = f" (about {mb} MB)" if isinstance(mb, (int, float)) else ""        # never "about ? MB"
+        return (f"Delete old temporary files{size}",
+                f"Temporary files older than {age} minutes will be deleted from: {folders}."
+                + (f" About {mb} MB." if size else "") + " " + spec.change_note)
     detail = ", ".join(f"{k}: {v}" for k, v in args.items())
     if spec.summary:
         summary = spec.summary.format(**{k: str(v).replace("_", " ") for k, v in args.items()})
@@ -433,7 +434,7 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
     proposal = {"diagnosis": _keep_warning(d["answer"], diagnostics), "reason": d["reason"], "fix": None}
     if d["fix"] == "none":
         proposal.update(next_step_offer(d.get("next"), d["answer"]))
-        if not proposal.get("offer") and closing_line(d.get("next")):
+        if not proposal.get("offer") and closing_line(d.get("next")) and not proposal["diagnosis"].rstrip().endswith("?"):
             proposal["diagnosis"] += "\n\n" + closing_line(d.get("next"))
     if d["fix"] == "escalate":
         proposal.update(
@@ -446,7 +447,41 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
         proposal.update(fix=d["fix"], summary=summary, what_changes=changes,
                         risk=TOOLS[d["fix"]].risk,
                         steps=[{"tool": d["fix"], "args": d["args"], "label": summary}])
+        if only_asks(request):
+            # The user asked a question ("tell me about my storage"): answer it, and offer the change as a small
+            # yes/no follow-up instead of an approval card. It is still checked and verified the same way.
+            proposal["diagnosis"] = _drop_trailing_question(proposal["diagnosis"])
+            proposal.update(offer=True, recheck=True, ask=f"Want me to {_lower(summary)}?")
     return proposal
+
+
+# A question or a request for information, not a request to change anything.
+_ASKS = re.compile(r"^\s*(?:(?:hi|hey|hello|ok|okay|so|and|but|please|pls)[\s,]+)*"
+                   r"(?:what|which|how\s+much|how\s+many|is|are|am|do|does|did|can\s+(?:i|you|u)\s+(?:know|see|tell|check|show)|"
+                   r"may\s+i\s+know|tell\s+me|show\s+me|let\s+me\s+know|i\s+(?:want|need|would\s+like)\s+to\s+(?:know|see|check)|"
+                   r"check|where|when|why|who)\b", re.IGNORECASE)
+_WANTS_CHANGE = re.compile(r"\b(clean|clear|delete|remove|free\s+up|fix|repair|close|kill|end|stop|restart|flush|reset|"
+                           r"empty|speed\s+up|solve|install|uninstall|turn\s+(?:on|off)|enable|disable|change|set)\b",
+                           re.IGNORECASE)
+
+
+def only_asks(request: str) -> bool:
+    """True when the user only wants to know something (no fix asked for)."""
+    text = request.strip()
+    return bool((_ASKS.search(text) or text.endswith("?")) and not _WANTS_CHANGE.search(text))
+
+
+def _drop_trailing_question(text: str) -> str:
+    """The model often ends with its own "Want me to ...?": the offer asks that, so it is not said twice."""
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    while len(parts) > 1 and parts[-1].endswith("?"):
+        parts.pop()
+    return " ".join(parts)
+
+
+def _lower(summary: str) -> str:
+    s = (summary or "").strip().rstrip(".")
+    return s[:1].lower() + s[1:] if s and not re.match(r"^[A-Z]{2,}", s) else s
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +500,36 @@ _KB_MISSED = re.compile(
     r"|\b(?:the\s+)?articles?\s+(?:i\s+)?found\s+(?:only\s+)?(?:cover|are\s+about|talk\s+about|describe)\b"
     r"|\bno\s+(?:relevant\s+)?(?:article|information|steps)\b[^.]{0,60}\bknowledge\s*base\b",
     re.IGNORECASE)
+
+
+# "how much memory is left", "exact memeory left": RAM or storage? Everyday speech uses "memory" for both.
+_MEMORY_WORD = re.compile(r"\bme+m+[eo]*r+[iy]\b|\bmemory\b", re.IGNORECASE)
+_MEMORY_CLEAR = re.compile(r"\b(ram|ddr\d?|storage|disk|drive|ssd|hdd|space|c:|d:|process(?:es)?|apps?|programs?|"
+                           r"using|uses|used by|slow|leak|card|usb|sd|phone|cpu)\b", re.IGNORECASE)
+_MEMORY_AMOUNT = re.compile(r"\b(left|free|available|remaining|how\s+much|exact|total|have|check|show|tell|know|status)\b",
+                            re.IGNORECASE)
+
+
+def memory_is_unclear(request: str) -> bool:
+    return bool(_MEMORY_WORD.search(request) and _MEMORY_AMOUNT.search(request) and not _MEMORY_CLEAR.search(request))
+
+
+def memory_overview_text(health: dict, drives: dict) -> str:
+    """Both meanings of "memory": storage per drive and RAM, measured just now."""
+    lines = []
+    for d in (drives.get("drives") or []) if drives.get("ok") is not False else []:
+        lines.append(f"- **Storage, {d['drive']} drive:** {d['free_gb']:g} GB free of {d['total_gb']:g} GB "
+                     f"({d['used_percent']:g}% used)")
+    if health.get("ok") is not False and health.get("ram_total_gb"):
+        lines.append(f"- **RAM (working memory):** {health['ram_available_gb']:g} GB free of {health['ram_total_gb']:g} GB")
+    if not lines:
+        return "I couldn't read your storage or memory just now. Try again in a moment?"
+    text = "\"Memory\" can mean two things, so here are both:\n\n" + "\n".join(lines)
+    full = [d for d in drives.get("drives") or [] if d.get("used_percent", 0) >= 85]
+    if full:
+        text += (f"\n\nYour {full[0]['drive']} drive is getting full. If you'd like, ask me to clean up temporary files "
+                 "and I'll show you how much I can free before I touch anything.")
+    return text
 
 
 def _keep_warning(answer_text: str, diagnostics: dict) -> str:
@@ -525,7 +590,7 @@ def general_answer(request: str, history: list | None = None) -> dict:
                 "general": True}
     if not d["escalate"]:
         proposal.update(next_step_offer(d.get("next"), d["answer"]))
-        if not proposal.get("offer") and closing_line(d.get("next")):
+        if not proposal.get("offer") and closing_line(d.get("next")) and not proposal["diagnosis"].rstrip().endswith("?"):
             proposal["diagnosis"] += "\n\n" + closing_line(d.get("next"))
     if d["escalate"]:
         proposal.update(

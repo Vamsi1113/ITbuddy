@@ -34,7 +34,7 @@ def test_the_whole_flow_asks_then_does_the_step(monkeypatch):
     first = runner.start(graph, "How do I connect to the VPN?")
     card = first["approval"]
     assert card["style"] == "offer" and card["say"] == "Want me to open the VPN settings? Just say OK." and "VPN app" in card["diagnosis"]
-    assert runner.resume(graph, first["task_id"], True)["state"]["outcome"] == "fixed"
+    assert runner.resume(graph, first["task_id"], True)["state"]["outcome"] == "done"     # "Done", not "Done and verified"
 
 
 def test_without_a_step_the_answer_still_ends_warmly():

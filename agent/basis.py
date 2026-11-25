@@ -239,9 +239,9 @@ def _result_line(state: dict) -> list[str]:
         return [_line("Result", f"ticket {t.get('ref', '')} opened for IT" if t else "passed to IT, nothing changed")]
     if outcome == "rejected":
         return [_line("Result", "you declined, so nothing was changed")]
-    if outcome in ("fixed", "not_fixed"):
+    if outcome in ("fixed", "done", "not_fixed"):
         what = proposal.get("summary") or "a change"
-        tail = "you approved it first" + ("" if outcome == "fixed" else "; it did not fully work")
+        tail = "you approved it first" + ("" if outcome in ("fixed", "done") else "; it did not fully work")
         return [_line("Result", f"{what} ({tail})")]
     if outcome == "error":
         return [_line("Result", "stopped with an error, nothing was changed")]
@@ -251,6 +251,8 @@ def _result_line(state: dict) -> list[str]:
 def build(state: dict) -> list[str]:
     """The lines for the "Steps taken" panel of this task (empty for plain chat)."""
     if state.get("outcome") == "chat":
+        return []
+    if state.get("outcome") == "done" and not state.get("auto_history"):   # a small "opened X": nothing to explain
         return []
     out = _outputs(state)
     proposal = state.get("proposal") or {}
@@ -277,6 +279,6 @@ def build(state: dict) -> list[str]:
         if l not in seen:
             seen.add(l)
             final.append(l)
-    if not final and state.get("agent") == "computer_use":
+    if not final and (state.get("agent") == "computer_use" or state.get("outcome") == "done"):
         return []                    # a simple computer task with nothing to explain: no "Steps taken" panel at all
     return final[:MAX_LINES - len(result)] + result              # the result line is always kept

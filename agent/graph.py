@@ -173,9 +173,23 @@ def diagnose_node(state: State) -> dict:
             return _service_desk(state)
         if agent == "devices" and (printing.is_print_problem(state["request"]) or printing.is_print_status(state["request"])):
             return _diagnose_printing(state)
+        if agent in ("performance", "storage") and specialists.memory_is_unclear(state["request"]):
+            return _memory_overview(state)
         return _diagnose(state, DOMAINS[agent])
     except (ModelError, PolicyError) as e:
         return {"outcome": "error", "error": str(e)}
+
+
+def _memory_overview(state: State) -> dict:
+    """ "How much memory is left?": people mean storage as often as RAM, so measure both and say both."""
+    _emit(state["agent"], "Checking your storage and memory")
+    perf, disk = _runner(state, "performance"), _runner(state, "storage")
+    health = _run(perf, "get_system_health", {})
+    drives = _run(disk, "get_disk_usage", {})
+    text = specialists.memory_overview_text(health, drives)
+    return {"diagnostics": {"get_system_health": health, "get_disk_usage": drives},
+            "tool_calls": perf.calls_made + disk.calls_made, "outcome": "no_action",
+            "proposal": {"diagnosis": text, "fix": None, "reason": ""}}
 
 
 def _diagnose(state: State, domain) -> dict:
@@ -396,9 +410,11 @@ def execute_node(state: State) -> dict:
 
 def verify_node(state: State) -> dict:
     agent = state["agent"]
-    if (state.get("proposal") or {}).get("offer"):          # a small extra the user said yes to: no re-check needed
+    proposal = state.get("proposal") or {}
+    if proposal.get("offer") and not proposal.get("recheck"):   # a small extra the user said yes to: nothing to re-check
         ok = all(r.get("ok") is not False for r in state.get("fix_results", []))
-        return {"comparison": [], "verify_note": "", "outcome": "fixed" if ok else "not_fixed"}
+        # "done", not "fixed": opening a page is not a verified fix, so no "Done and verified" badge
+        return {"comparison": [], "verify_note": "", "outcome": "done" if ok else "not_fixed"}
     _emit(agent, "Checking the result: running the checks again")
     runner = _runner(state)
     try:
@@ -412,8 +428,9 @@ def verify_node(state: State) -> dict:
     audit.log_event(state["task_id"], "result", agent=agent, detail=v)
     if v["fixed"] and agent == "computer_use":
         v["comparison"] = []          # a simple task that worked: a one-line "Done!", no Before/After table
+    simple = v["fixed"] and proposal.get("verify") == "steps_ok"     # "opened X": done, but nothing to verify
     out = {"comparison": v["comparison"], "verify_note": v["note"],
-           "outcome": "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
+           "outcome": "done" if simple else "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
     if not v["fixed"] and agent != "computer_use":       # a computer task that did not work is not an IT incident
         merged = {**state, **out}
         out["ticket"] = _open_ticket(merged, state["request"][:100],
@@ -466,10 +483,10 @@ def report_node(state: State) -> dict:
             outcome = "chat"                          # a "no thanks" to a small offer: a plain reply, no status badge
         elif outcome == "rejected":
             parts.append(voice.declined() + " " + _alternatives(agent))
-        elif outcome in ("fixed", "not_fixed"):
+        elif outcome in ("fixed", "done", "not_fixed"):
             # the diagnosis was already on the approval card: now just say what happened, like a person would
             failed = [r for r in state.get("fix_results", []) if r.get("ok") is False]
-            if outcome == "fixed":
+            if outcome in ("fixed", "done"):
                 parts.append(voice.done(proposal.get("summary", ""), state.get("verify_note", "")))
             else:
                 why = (failed[0].get("error") or failed[0].get("output")) if failed else state.get("verify_note")

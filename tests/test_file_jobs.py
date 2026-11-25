@@ -110,4 +110,5 @@ def test_an_accepted_offer_is_done_without_a_recheck(monkeypatch):
     monkeypatch.setattr("agent.specialists.verify", lambda *a, **k: pytest.fail("no re-check for an offer"))
     first = runner.start(graph, "is a printer connected to my system")
     state = runner.resume(graph, first["task_id"], True)["state"]
-    assert state["outcome"] == "fixed" and "Opened the printer settings ✓" in state["report"]
+    assert state["outcome"] == "done" and "Opened the printer settings ✓" in state["report"]
+    assert state["basis"] == []                     # no "Steps taken" for a small "opened X"
