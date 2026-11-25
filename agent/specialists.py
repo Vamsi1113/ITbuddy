@@ -344,6 +344,22 @@ def closing_line(raw) -> str:
     return line if line and not re.search(r"(?i)\bsay ok\b|\bjust say\b", line) else ""
 
 
+def compose_note(request: str, history: list | None = None) -> dict:
+    """Write the text the user asked to have in a note ("the steps to create a python file in VS Code and run it").
+    Returns {"intro", "text", "title"}; the user sees the text on the approval card before anything is saved."""
+    from agent.memory import as_text
+
+    def validate(d: dict) -> dict:
+        text = str(d.get("text") or "").replace("\r\n", "\n").strip()
+        if not text:
+            raise ValueError('"text" must be the note itself, non-empty')
+        title = re.sub(r"[^\w .()-]", "", str(d.get("title") or "")).strip()[:60]
+        return {"text": text[:6000], "title": title, "intro": str(d.get("intro") or "").strip()[:160]}
+
+    earlier = f"EARLIER CONVERSATION:\n{as_text(history, 1500)}\n\n" if history else ""
+    return ask_json(prompts.NOTE_WRITER, f"{earlier}User request: {request.strip()[:800]}", validate)
+
+
 def next_step_offer(raw, diagnosis: str = "") -> dict:
     """The "next step" the model suggests, as a Yes/No offer Tobi can do itself (open a settings page or an allowed
     app). Anything unknown or unsafe is dropped silently: the answer is then given as it is."""
@@ -831,7 +847,8 @@ class ComputerUse:
     _LOCAL = re.compile(r"(?<!\w)(in|on)\s+my\s+(system|pc|laptop|computer|machine)(?!\w)|(?<!\w)installed(?!\w)", re.IGNORECASE)
     _OPEN_IT = re.compile(r"(?<!\w)(open|launch|start|run)\s+(it|that|this|them)(?!\w)", re.IGNORECASE)
     _INSTALL = re.compile(r"(?<!\w)install(?!\w)", re.IGNORECASE)
-    _NOT_SIMPLE = re.compile(r"(?<!\w)(write|type|save|summary|download|report|note|portal|health|and then|record|recording|"
+    _NOT_SIMPLE = re.compile(r"(?<!\w)(write|writing|written|type|typing|save|summary|download|report|note|notes|portal|health|"
+                             r"and then|record|recording|explain|answer|steps|"
                              r"screenshot|capture|press|click|seconds?|minutes?|start a)(?!\w)", re.IGNORECASE)
     _DOMAIN = re.compile(r"(?<![\w@.-])((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#][^\s]*)?)", re.IGNORECASE)
 
@@ -840,6 +857,19 @@ class ComputerUse:
 
     _PASSWORD = re.compile(r"(?<!\w)(reset|forgot|forgotten|unlock|recover|change|lost)(?!\w).{0,40}(?<!\w)(password|passcode|pin)(?!\w)|"
                            r"(?<!\w)(password|account)(?!\w).{0,25}(?<!\w)(reset|locked out|is locked|unlock)(?!\w)", re.IGNORECASE)
+    # "my system pattern password": could be the Windows sign-in, the PIN / picture password or the company account
+    _PASSWORD_UNCLEAR = re.compile(r"(?<!\w)(pattern|system|laptop|computer|pc|desktop|login|log\s*in|"
+                                   r"lock\s*screen|screen\s*lock|device)(?!\w)", re.IGNORECASE)
+    # Windows Hello PIN / picture password / fingerprint: the user changes it in Settings, no IT needed
+    _HELLO = re.compile(r"(?<!\w)(pin|windows\s+hello|hello\s+pin|picture\s+password|fingerprint|face\s+(?:sign|recognition))(?!\w)",
+                        re.IGNORECASE)
+    _PASSWORD_WHICH = re.compile(r"(?<!\w)(company|work|email|e-mail|outlook|office|365|m365|microsoft account|domain|"
+                                 r"network|vpn|teams|forgot|forgotten|locked out|is locked|expired|lost)(?!\w)", re.IGNORECASE)
+    PASSWORD_QUESTION = ("Quick check so I send you to the right place. Which one do you mean?\n\n"
+                         "1. Your Windows sign-in password (the one you type to unlock this PC)\n"
+                         "2. Your PIN or picture password (Windows Hello)\n"
+                         "3. Your company or email account password\n\n"
+                         "Just reply with the number.")
 
     _SEARCH = re.compile(r"^\s*" + _PREFIX + r"(search(?:\s+the\s+web|\s+online|\s+google)?(?:\s+for)?|google|look\s*up|"
                          r"find(?:\s+me)?|research)(?!\w)\s*(.*)$", re.IGNORECASE | re.DOTALL)
@@ -888,6 +918,33 @@ class ComputerUse:
     _FILE_NAME = re.compile(r"(?:(?:with|under)\s+(?:a\s+|the\s+)?name(?:\s+of)?|named|called|name\s+(?:it|this|that)(?:\s+as)?|"
                             r"(?:file\s*)?name\s*(?:is|:)?)\s+(?:the\s+)?" + _NAME_TAIL, re.IGNORECASE)
     _FILE_NAME_AS = re.compile(r"(?<!\w)as\s+(?:the\s+)?" + _NAME_TAIL, re.IGNORECASE)
+    _COMPOSE_VERB = re.compile(r"(?<!\w)(write|writing|written|type|typing|put|create|make|prepare|draft|jot|note\s+down|"
+                               r"add|fill|save)(?!\w)", re.IGNORECASE)
+    # what the user wants written, described rather than quoted: "the answer to ...", "the steps to ...", "about ..."
+    _COMPOSE_WHAT = re.compile(r"(?<!\w)(answer|answers|steps|instructions|explanation|explain|explaining|summary|summari[sz]e|"
+                               r"guide|checklist|list|notes?\s+(?:on|about|for)|how\s+to|how\s+do|what\s+(?:is|are)|"
+                               r"why|about|describing|tips)(?!\w)", re.IGNORECASE)
+
+    def _folder_and_name(self, text: str) -> tuple[str, str]:
+        folder = next((f for f in ("Desktop", "Downloads", "Documents") if re.search(rf"(?<!\w){f}(?!\w)", text, re.IGNORECASE)),
+                      "Documents")
+        found = self._FILE_NAME.search(text) or self._FILE_NAME_AS.search(text)
+        name = found.group(1).strip() if found else ""
+        name = re.sub(r"(?i)^(?:an?\s+|the\s+)?(?:text\s*)?(?:file|note)\s+(?:called|named)\s+", "", name)
+        name = re.sub(r"(?i)^(?:an?\s+|the\s+)?(?:text\s*)?(?:file|note)$", "", name)
+        if len(name.split()) > 6 or self._COMPOSE_WHAT.search(name):   # "as the answer to ..." is not a file name
+            name = ""
+        return folder, name
+
+    def _compose_pick(self, text: str) -> dict | None:
+        """"create a notepad file with the steps to run python in vs code" -> write_note whose text Tobi writes first.
+        The user describes the content instead of quoting it, so the model writes it and the user sees it before saving."""
+        if self._QUOTED.search(text) or not self._NOTE_TARGET.search(text):
+            return None
+        if not (self._COMPOSE_VERB.search(text) and self._COMPOSE_WHAT.search(text)):
+            return None
+        folder, name = self._folder_and_name(text)
+        return {"task": "write_note", "compose": True, "text": "", "filename": name, "folder": folder, "reason": ""}
 
     def _note_pick(self, text: str) -> dict | None:
         """"write "<text>" in a new Notepad and save it with the name X on the Desktop" -> a write_note task."""
@@ -1063,6 +1120,9 @@ class ComputerUse:
         """Recognise "open <site/app>" and "install <catalogue program>" without a model call. None = not one of these."""
         text = request.strip()
         low = text.lower()
+        note = self._note_pick(text) or self._compose_pick(text)   # first: "write the steps to install X in notepad"
+        if note:
+            return note
         gone = self._delete_pick(text)
         if gone:
             return gone
@@ -1074,14 +1134,15 @@ class ComputerUse:
             return pdf
         if re.search(r"(?<!\w)(uninstall|remove|delete)(?!\w)", low):
             return None
-        if self._PASSWORD.search(low):
+        if self._PASSWORD.search(low) or (self._HELLO.search(low) and re.search(r"(?<!\w)(change|set|reset|forgot|update|new)(?!\w)", low)):
+            if self._HELLO.search(low) and not re.search(r"(?<!\w)(company|email|outlook|account)(?!\w)", low):
+                return {"task": "hello_sign_in", "reason": ""}
+            if self._PASSWORD_UNCLEAR.search(low) and not self._PASSWORD_WHICH.search(low):
+                return {"task": "clarify", "question": self.PASSWORD_QUESTION, "reason": ""}
             return {"task": "password_reset", "reason": ""}
         if self._INSTALL.search(low):
             entry = find_installable(text)
             return {"task": "install_software", "package": entry["name"], "reason": ""} if entry else None
-        note = self._note_pick(text)
-        if note:
-            return note
         # "find chrome on my laptop and open it": it is installed here, so open the app (never search the web for it)
         if self._LOCAL.search(low) and re.search(r"(?<!\w)(open|launch|start|run)(?!\w)", low):
             apps = cfg("desktop", "allowed_apps", default={}) or {}
@@ -1283,6 +1344,21 @@ class ComputerUse:
     _APP_NAMES = {"vscode": "VS Code", "vs code": "VS Code", "visual studio code": "Visual Studio Code",
                   "powerpoint": "PowerPoint", "onenote": "OneNote", "7-zip": "7-Zip", "notepad++": "Notepad++"}
 
+    def plan_hello_sign_in(self) -> dict:
+        """PIN / picture password / fingerprint: the user changes it in Settings themselves. Offer to open the page."""
+        return {
+            "diagnosis": "Got it, that one you can change yourself. It lives in Settings → Accounts → **Sign-in options**: "
+                         "choose **PIN (Windows Hello)** → **Change PIN**, type your current PIN, then the new one twice. "
+                         "Forgot the current one? On the same page there's an **I forgot my PIN** link.",
+            "fix": "computer_use_task", "reason": "", "risk": policy.R1, "offer": True,
+            "ask": "Want me to open Sign-in options for you?",
+            "summary": "Open the Sign-in options settings",
+            "what_changes": "The Settings app opens on Sign-in options. Nothing is changed.",
+            "steps": [{"tool": "open_settings_page", "args": {"page": "sign_in_options"}, "domain": "settings",
+                       "label": "Open Settings → Accounts → Sign-in options"}],
+            "expected_file": None, "verify": "steps_ok",
+        }
+
     def plan_open_app(self, app: str) -> dict:
         label = self._APP_NAMES.get(app, app.title())
         return {
@@ -1396,8 +1472,15 @@ class ComputerUse:
             {"tool": "open_in_notepad", "args": {"path": str(target)}, "domain": "files",
              "label": f"Open {target.name} in Notepad"},
         ]
+        place = "on your Desktop" if folder_name == "Desktop" else f"in your {folder_name}"
+        if choice.get("compose"):
+            quoted = "\n".join(f"> {line}" if line.strip() else ">" for line in text.splitlines())
+            extra = {"diagnosis": f"{choice.get('intro') or 'Here is what I wrote for you:'}\n\n{quoted}",
+                     "ask": f"Shall I save this as {target.name} {place} and open it in Notepad?"}
+        else:
+            extra = {"diagnosis": f"I can save your text as {target.name} {place} and open it in Notepad."}
         return {
-            "diagnosis": f"I can save your text as {target.name} in {folder_name} and open it in Notepad.",
+            **extra,
             "fix": "computer_use_task", "reason": "", "risk": policy.R1,
             "summary": f"Save your note as {target.name} in {folder_name}",
             "what_changes": (f"A new text file `{target}` is created with exactly the text below, then opened in Notepad. "
@@ -1431,10 +1514,8 @@ class ComputerUse:
                     f"It could not be deleted: {results[-1].get('error', 'unknown error')}"}
         if proposal.get("verify") in ("steps_ok", "install"):
             ok = len(results) == len(proposal["steps"]) and all(r.get("ok") for r in results)
-            if proposal["verify"] == "steps_ok":
-                return {"comparison": [{"metric": proposal["summary"], "before": "not done",
-                                        "after": "done" if ok else "failed"}],
-                        "fixed": ok,
+            if proposal["verify"] == "steps_ok":         # a simple task: a one-line "Done!", no Before/After table
+                return {"comparison": [], "fixed": ok,
                         "note": "It was opened." if ok else
                                 f"It could not be opened: {results[-1].get('error', 'unknown error')}"}
             entry = find_installable(proposal.get("package", ""))

@@ -277,4 +277,6 @@ def build(state: dict) -> list[str]:
         if l not in seen:
             seen.add(l)
             final.append(l)
+    if not final and state.get("agent") == "computer_use":
+        return []                    # a simple computer task with nothing to explain: no "Steps taken" panel at all
     return final[:MAX_LINES - len(result)] + result              # the result line is always kept

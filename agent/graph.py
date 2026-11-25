@@ -121,7 +121,7 @@ def route_node(state: State) -> dict:
         #  - an approved-catalogue install (user approves first)
         #  - a password reset/unlock, which is answered by opening the official self-service page
         if quick and ((quick["task"] == "install_software" and reasons == {policy.R3_SOFTWARE})
-                      or (quick["task"] == "password_reset" and reasons == {policy.R3_PASSWORD})):
+                      or (quick["task"] in ("password_reset", "clarify", "hello_sign_in") and reasons == {policy.R3_PASSWORD})):
             sensitive = None
     if sensitive:
         category, why = sensitive
@@ -280,6 +280,14 @@ def _diagnose_computer_use(state: State) -> dict:
         if choice["task"] == "open_app":
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_app(choice["app"])}
         if choice["task"] == "write_note":
+            if choice.get("compose"):            # the user described the content: write it first, show it, then save
+                _emit("computer_use", "Writing the note for you")
+                try:
+                    wrote = specialists.compose_note(state["request"], state.get("history"))
+                except ModelError as e:
+                    return {"outcome": "error", "error": f"I could not write the note: {e}"}
+                choice = {**choice, "text": wrote["text"], "intro": wrote["intro"],
+                          "filename": choice.get("filename") or wrote["title"]}
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_write_note(choice)}
         if choice["task"] == "open_folder":
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_open_folder(choice["folder"])}
@@ -306,6 +314,10 @@ def _diagnose_computer_use(state: State) -> dict:
             return {"diagnostics": {}, "proposal": proposal, **({} if proposal["fix"] else {"outcome": "no_action"})}
     except (ValueError, PolicyError) as e:
         return {"outcome": "refused", "error": f"{e}."}
+    if choice["task"] == "clarify":           # the request could mean different things: ask first, do nothing yet
+        return {"outcome": "chat", "question": choice["question"]}
+    if choice["task"] == "hello_sign_in":
+        return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_hello_sign_in()}
     if choice["task"] == "password_reset":
         try:
             return {"diagnostics": {}, "proposal": COMPUTER_USE.plan_password_reset()}
@@ -398,6 +410,8 @@ def verify_node(state: State) -> dict:
         v["fixed"] = False
         v["note"] = "The fix did not complete, so the problem is not confirmed as solved."
     audit.log_event(state["task_id"], "result", agent=agent, detail=v)
+    if v["fixed"] and agent == "computer_use":
+        v["comparison"] = []          # a simple task that worked: a one-line "Done!", no Before/After table
     out = {"comparison": v["comparison"], "verify_note": v["note"],
            "outcome": "fixed" if v["fixed"] else "not_fixed", "tool_calls": runner.calls_made}
     if not v["fixed"] and agent != "computer_use":       # a computer task that did not work is not an IT incident

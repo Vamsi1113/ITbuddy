@@ -189,9 +189,11 @@ def test_a_failed_fill_cancels_the_print_and_its_window(docs, monkeypatch):
 
 def test_friendly_wording():
     from agent import voice
-    assert voice.offer("Save RAGAS.txt as a PDF in Desktop") == "Sure, I'll save RAGAS.txt as a PDF on your Desktop. Just say OK and I'll get it done."
-    assert voice.done("Save RAGAS.txt as a PDF in Desktop", "The file was saved: C:/x.pdf").startswith("Done! Saved RAGAS.txt as a PDF on your Desktop")
-    assert voice.offer("Close chrome.exe (PID 1)").startswith("Sure, I'll close chrome.exe")
+    assert "save RAGAS.txt as a PDF on your Desktop" in voice.offer("Save RAGAS.txt as a PDF in Desktop")
+    assert "Saved RAGAS.txt as a PDF on your Desktop ✓" in voice.done("Save RAGAS.txt as a PDF in Desktop", "The file was saved: C:/x.pdf")
+    assert "close chrome.exe" in voice.offer("Close chrome.exe (PID 1)")
+    lines = [voice.offer("Open Notepad") for _ in range(4)]
+    assert len(set(lines)) == 4 and all(a != b for a, b in zip(lines, lines[1:]))     # never the same line twice in a row
     assert "nothing was changed" in voice.declined()
     assert voice.failed("Open the VPN app", "it is not installed").startswith("I tried to open the VPN app, but it didn't work out.")
 
@@ -212,7 +214,7 @@ def test_a_failed_computer_task_does_not_open_an_it_ticket(monkeypatch):
     graph = graph_module.build_graph(MemorySaver())
     first = runner.start(graph, "convert a.txt to pdf")
     card = first["approval"]
-    assert card["say"].startswith("Sure, I'll save a.txt as a PDF on your Desktop")
+    assert "save a.txt as a PDF on your Desktop" in card["say"]
     state = runner.resume(graph, first["task_id"], True)["state"]
     assert state["outcome"] == "not_fixed" and opened == []
     assert state["report"].startswith("I tried to save a.txt as a PDF on your Desktop, but it didn't work out.")

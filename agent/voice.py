@@ -46,14 +46,29 @@ def past(summary: str) -> str:
     return f"{word} {rest}".strip() if word else s
 
 
+# Several phrasings, used in turn, so Tobi never says the same sentence twice in a row.
+_OFFERS = ("Sure, I'll {s}. Just say OK and I'll get it done.",
+           "I can {s} for you right now. OK to go ahead?",
+           "Want me to {s}? Just give me the OK.",
+           "Happy to {s}. Shall I go ahead?")
+_DONES = ("Done! {p} ✓", "All set! {p} ✓", "There you go! {p} ✓", "Done and dusted! {p} ✓")
+_turns = {"offer": 0, "done": 0}
+
+
+def _next(kind: str, options: tuple) -> str:
+    i = _turns[kind]
+    _turns[kind] = i + 1
+    return options[i % len(options)]
+
+
 def offer(summary: str) -> str:
     """The friendly line at the top of an approval card."""
     s = _nicer(_lower_first(summary)) or "do that"
-    return f"Sure, I'll {s}. Just say OK and I'll get it done."
+    return _next("offer", _OFFERS).format(s=s)
 
 
 def done(summary: str, note: str = "") -> str:
-    line = f"Done! {past(summary)} ✓"
+    line = _next("done", _DONES).format(p=past(summary))
     note = (note or "").strip()
     if note and not note.lower().startswith(("it was opened", "the action completed")):
         line += f"\n\n{note}"
