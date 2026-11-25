@@ -329,12 +329,62 @@ def _infer_settings_page(text: str) -> str | None:
     return max(hits, key=len) if hits else None
 
 
+def _with_next_choices(prompt: str) -> str:
+    """Fill the pages and apps Tobi can open itself into a prompt."""
+    from tools.settings import PAGES
+    apps = ", ".join(sorted(cfg("desktop", "allowed_apps", default={}) or {}))
+    return prompt.replace("{pages}", ", ".join(PAGES)).replace("{apps}", apps)
+
+
+def closing_line(raw) -> str:
+    """When there is no step Tobi can do itself, the model's friendly closing line (never a question that expects a button)."""
+    if not isinstance(raw, dict) or str(raw.get("do") or "").strip().lower() not in ("", "none"):
+        return ""
+    line = re.sub(r"\s+", " ", str(raw.get("ask") or "")).strip()[:200]
+    return line if line and not re.search(r"(?i)\bsay ok\b|\bjust say\b", line) else ""
+
+
+def next_step_offer(raw, diagnosis: str = "") -> dict:
+    """The "next step" the model suggests, as a Yes/No offer Tobi can do itself (open a settings page or an allowed
+    app). Anything unknown or unsafe is dropped silently: the answer is then given as it is."""
+    if not isinstance(raw, dict) or policy.is_read_only():
+        return {}
+    ask = re.sub(r"\s+", " ", str(raw.get("ask") or "")).strip()[:160]
+    do = str(raw.get("do") or "").strip().lower().replace(" ", "_")
+    if do == "open_settings_page":
+        from tools.settings import PAGES
+        page = str(raw.get("page") or "").strip().lower().replace(" ", "_").replace("-", "_")
+        if page not in PAGES:
+            page = _infer_settings_page(f"{raw.get('page', '')} {ask}") or ""
+        if page not in PAGES:
+            return {}
+        label = page.replace("_", " ")
+        step = {"tool": "open_settings_page", "args": {"page": page}, "domain": "settings",
+                "label": f"Open the {label} settings"}
+        summary = f"Open the {label} settings"
+    elif do == "open_application":
+        apps = cfg("desktop", "allowed_apps", default={}) or {}
+        name = str(raw.get("app") or "").strip().lower()
+        if name not in apps:
+            return {}
+        step = {"tool": "open_application", "args": {"name": name}, "domain": "computer_use", "label": f"Open {name.title()}"}
+        summary = f"Open {name.title()}"
+    else:
+        return {}
+    if not ask or "?" not in ask:
+        ask = f"Want me to do the first step for you? {summary}. Just say OK."
+    return {"fix": "computer_use_task", "risk": policy.R1, "summary": summary, "offer": True, "ask": ask,
+            "what_changes": "Nothing on your computer is changed.", "steps": [step], "expected_file": None,
+            "verify": "steps_ok"}
+
+
 def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
     fixes = [] if policy.is_read_only() else tools_for(domain.name, read_only=False)
     fix_names = {f.name for f in fixes}
     fix_text = catalogue_text(fixes) if fixes else "(no changes are available for this specialist right now)"
     system = (prompts.ANSWER.replace("{label}", domain.label).replace("{guidance}", domain.guidance)
               .replace("{fixes}", fix_text))
+    system = _with_next_choices(system)
 
     def validate(d: dict) -> dict:
         text = d.get("answer")
@@ -343,7 +393,8 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
         fix = _match_fix(d.get("fix"), fix_names)
         if fix is None:
             raise ValueError(f'"fix" must be exactly one of {sorted(fix_names | {"none", "escalate"})}')
-        out = {"answer": text.strip(), "fix": fix, "reason": str(d.get("reason") or "").strip(), "args": {}}
+        out = {"answer": text.strip(), "fix": fix, "reason": str(d.get("reason") or "").strip(), "args": {},
+               "next": d.get("next")}
         if fix in fix_names:
             args = _collect_args(fix, d, diagnostics)
             if fix == "open_settings_page" and not args.get("page"):
@@ -359,6 +410,10 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
     user = f"User request: {request.strip()[:500]}\n\nTOOL OUTPUT:\n{json.dumps(diagnostics, default=str)}"
     d = ask_json(system, user, validate)
     proposal = {"diagnosis": d["answer"], "reason": d["reason"], "fix": None}
+    if d["fix"] == "none":
+        proposal.update(next_step_offer(d.get("next"), d["answer"]))
+        if not proposal.get("offer") and closing_line(d.get("next")):
+            proposal["diagnosis"] += "\n\n" + closing_line(d.get("next"))
     if d["fix"] == "escalate":
         proposal.update(
             fix="escalate", risk=policy.R1, steps=[],
@@ -401,12 +456,16 @@ def general_answer(request: str, history: list | None = None) -> dict:
         text = str(d.get("answer") or "").strip()
         if not text:
             raise ValueError('"answer" must be non-empty text')
-        return {"answer": text[:2500], "escalate": bool(d.get("escalate"))}
+        return {"answer": text[:2500], "escalate": bool(d.get("escalate")), "next": d.get("next")}
 
     earlier = f"EARLIER CONVERSATION:\n{as_text(history, 1500)}\n\n" if history else ""
-    d = ask_json(prompts.GENERAL_ANSWER, f"{earlier}Question: {request.strip()[:500]}", validate)
+    d = ask_json(_with_next_choices(prompts.GENERAL_ANSWER), f"{earlier}Question: {request.strip()[:500]}", validate)
     proposal = {"diagnosis": f"{d['answer']}\n\n{GENERAL_NOTE}", "reason": "general knowledge", "fix": None,
                 "general": True}
+    if not d["escalate"]:
+        proposal.update(next_step_offer(d.get("next"), d["answer"]))
+        if not proposal.get("offer") and closing_line(d.get("next")):
+            proposal["diagnosis"] += "\n\n" + closing_line(d.get("next"))
     if d["escalate"]:
         proposal.update(
             diagnosis=d["answer"], fix="escalate", risk=policy.R1, steps=[],
