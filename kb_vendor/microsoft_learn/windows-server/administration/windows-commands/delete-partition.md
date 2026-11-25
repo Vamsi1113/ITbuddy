@@ -1,0 +1,52 @@
+<!-- source: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/delete-partition -->
+# delete partition
+
+Reference article for the delete partition command, which deletes the partition with focus.
+
+Deletes the partition with focus. Before you begin, you must select a partition for this operation to succeed. Use the select partition command to select a partition and shift the focus to it.
+
+> Warning:
+> Deleting a partition on a dynamic disk can delete all dynamic volumes on the disk, destroying any data and leaving the disk in a corrupt state.
+>
+> You can't delete the system partition, boot partition, or any partition that contains the active paging file or crash dump information.
+
+## Syntax
+
+```
+delete partition [noerr] [override]
+```
+
+### Parameters
+
+| Parameter | Description |
+| --------- | ----------- |
+| noerr | For scripting only. When an error is encountered, DiskPart continues to process commands as if the error did not occur. Without this parameter, an error causes DiskPart to exit with an error code. |
+| override | Enables DiskPart to delete any partition regardless of type. Typically, DiskPart only permits you to delete known data partitions. |
+
+#### Remarks
+
+- To delete a dynamic volume, always use the delete volume command instead.
+
+- Partitions can be deleted from dynamic disks, but they shouldn't be created. For example, it's possible to delete an unrecognized GUID Partition Table (GPT) partition on a dynamic GPT disk. Deleting such a partition doesn't cause the resulting free space to become available. Instead, This command is intended to allow you to reclaim space on a corrupted offline dynamic disk in an emergency situation where the clean command in DiskPart can't be used.
+
+## Examples
+
+To delete the partition with focus, type:
+
+```
+delete partition
+```
+
+## Related links
+
+- Command-Line Syntax Key
+
+- select partition
+
+- delete command
+
+- delete volume command
+
+- clean command
+
+_Source: Microsoft Learn, licensed CC BY 4.0._

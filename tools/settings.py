@@ -170,7 +170,7 @@ PAGES = {
     "proxy": "ms-settings:network-proxy", "bluetooth": "ms-settings:bluetooth", "printers": "ms-settings:printers",
     "windows_update": "ms-settings:windowsupdate", "apps": "ms-settings:appsfeatures",
     "default_apps": "ms-settings:defaultapps", "startup_apps": "ms-settings:startupapps",
-    "storage": "ms-settings:storagesense", "power": "ms-settings:powersleep", "date_time": "ms-settings:dateandtime",
+    "storage": "ms-settings:storagesense", "disks_and_volumes": "ms-settings:disksandvolumes", "power": "ms-settings:powersleep", "date_time": "ms-settings:dateandtime",
     "language": "ms-settings:regionlanguage", "personalization": "ms-settings:personalization",
     "colors": "ms-settings:colors", "notifications": "ms-settings:notifications", "privacy": "ms-settings:privacy",
     "camera": "ms-settings:privacy-webcam", "microphone": "ms-settings:privacy-microphone",

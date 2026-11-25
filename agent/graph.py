@@ -206,7 +206,7 @@ def _diagnose(state: State, domain) -> dict:
         else:
             _emit(agent, "Writing the answer (the local model can take a minute)")
             proposal = specialists.answer(domain, state["request"], diagnostics)
-            if general and proposal["diagnosis"].strip().upper().startswith(specialists.NO_KB_ANSWER):
+            if general and not proposal.get("fix") and specialists.kb_missed(proposal["diagnosis"]):
                 proposal = None                   # the articles found do not answer this question
         if proposal is None:
             _emit(agent, "Nothing in the knowledge base: answering from general knowledge")

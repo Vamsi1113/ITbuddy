@@ -387,8 +387,13 @@ def next_step_offer(raw, diagnosis: str = "") -> dict:
         summary = f"Open {name.title()}"
     else:
         return {}
-    if not ask or "?" not in ask:
-        ask = f"Want me to do the first step for you? {summary}. Just say OK."
+    # The question must name what will really open ("open Disk Management" must not open the Storage page)
+    target = step["args"].get("page") or step["args"].get("name") or ""
+    stems = {w[:4] for w in re.split(r"[\s_\-]+", target.lower()) if len(w) > 2 and w not in ("the", "and", "settings")}
+    asked = {w[:4] for w in re.findall(r"[a-z]+", ask.lower())}
+    if not ask or "?" not in ask or not stems <= asked:
+        what = f"the {target.replace('_', ' ')} settings" if step["tool"] == "open_settings_page" else target.title()
+        ask = f"Want me to open {what} for you?"
     return {"fix": "computer_use_task", "risk": policy.R1, "summary": summary, "offer": True, "ask": ask,
             "what_changes": "Nothing on your computer is changed.", "steps": [step], "expected_file": None,
             "verify": "steps_ok"}
@@ -425,7 +430,7 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
 
     user = f"User request: {request.strip()[:500]}\n\nTOOL OUTPUT:\n{json.dumps(diagnostics, default=str)}"
     d = ask_json(system, user, validate)
-    proposal = {"diagnosis": d["answer"], "reason": d["reason"], "fix": None}
+    proposal = {"diagnosis": _keep_warning(d["answer"], diagnostics), "reason": d["reason"], "fix": None}
     if d["fix"] == "none":
         proposal.update(next_step_offer(d.get("next"), d["answer"]))
         if not proposal.get("offer") and closing_line(d.get("next")):
@@ -449,6 +454,46 @@ def answer(domain: Domain, request: str, diagnostics: dict) -> dict:
 # ---------------------------------------------------------------------------
 NO_KB_ANSWER = "NO_KB_ANSWER"
 GENERAL_NOTE = "_General guidance from Tobi's own knowledge, not from your company's knowledge base._"
+
+
+# "I don't have the steps for X in the knowledge base", "the articles I found only cover ...": the model found
+# articles but they do not answer the question. Then Tobi answers from general knowledge instead of stopping there.
+_KB_MISSED = re.compile(
+    r"\b(?:i\s+)?(?:don'?t|do\s+not|couldn'?t|could\s+not|can'?t|cannot|didn'?t|did\s+not)\s+(?:have|find|see|locate)\b"
+    r"[^.]{0,120}\b(?:knowledge\s*base|articles?|kb|documentation)\b"
+    r"|\b(?:not|isn'?t|is\s+not)\s+(?:in|covered\s+(?:in|by))\s+(?:the|our|your)\s+(?:company\s+)?knowledge\s*base\b"
+    r"|\b(?:the\s+)?articles?\s+(?:i\s+)?found\s+(?:only\s+)?(?:cover|are\s+about|talk\s+about|describe)\b"
+    r"|\bno\s+(?:relevant\s+)?(?:article|information|steps)\b[^.]{0,60}\bknowledge\s*base\b",
+    re.IGNORECASE)
+
+
+def _keep_warning(answer_text: str, diagnostics: dict) -> str:
+    """A how-to guide's "Before you start:" warning (back up, admin rights, BitLocker) is never dropped: when the answer
+    cites that section but leaves the warning out, it is added as one line."""
+    cited = re.findall(r"\[([^\]]+?)\s*§\s*([^\]]+)\]", answer_text or "")
+    if not cited or re.search(r"(?i)\bback\s*up\b|\badministrator\b|\badmin rights\b", answer_text):
+        return answer_text
+    # The search result is a shortened excerpt, so the warning is read from the guide file itself.
+    kb_dir = Path(__file__).resolve().parent.parent / "kb"
+    for file_name, section in cited:
+        path = kb_dir / Path(file_name.strip()).name
+        if path.suffix != ".md" or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        start = text.find(f"## {section.strip()}")
+        if start < 0:
+            continue
+        end = text.find("\n## ", start + 3)
+        m = re.search(r"Before you start:\s*(.+)", text[start:end if end > 0 else None])
+        if m:
+            return f"{answer_text}\n\n⚠️ **Before you start:** {m.group(1).strip()}"
+    return answer_text
+
+
+def kb_missed(answer_text: str) -> bool:
+    """True when the knowledge-base answer is really "nothing here answers this"."""
+    text = (answer_text or "").strip()
+    return text.upper().startswith(NO_KB_ANSWER) or bool(_KB_MISSED.search(text[:400]))
 
 
 def kb_found_something(diagnostics: dict) -> bool:
